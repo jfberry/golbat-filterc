@@ -35,7 +35,7 @@ var genOps = []string{"==", "!=", "<", "<=", ">", ">="}
 func pick[T any](rng *rand.Rand, xs []T) T { return xs[rng.Intn(len(xs))] }
 
 func genAtom(rng *rand.Rand) string {
-	switch rng.Intn(10) {
+	switch rng.Intn(12) {
 	case 0, 1, 2, 3: // range comparison, sometimes with the literal first
 		g := pick(rng, genRangeFields)
 		op, v := pick(rng, genOps), pick(rng, g.vals)
@@ -64,9 +64,21 @@ func genAtom(rng *rand.Rand) string {
 			return fmt.Sprintf("pokemon in [%d, %d]", s, 1+rng.Intn(4))
 		}
 		return fmt.Sprintf("pokemon not in [%d, %d]", s, 1+rng.Intn(4))
+	case 8, 9: // species ranges and comparisons (small, so keys stay few)
+		switch rng.Intn(3) {
+		case 0:
+			return fmt.Sprintf("pokemon in %d..%d", rng.Intn(6), rng.Intn(6))
+		case 1:
+			return fmt.Sprintf("pokemon > %d", rng.Intn(6))
+		}
+		return fmt.Sprintf("pokemon < %d", 1+rng.Intn(6))
 	}
-	// species with a form
-	return fmt.Sprintf("(pokemon == %d && form %s %d)", 1+rng.Intn(4), pick(rng, []string{"==", "!="}), rng.Intn(3))
+	// species with a form, by id, comparison or range
+	s := 1 + rng.Intn(4)
+	if rng.Intn(4) == 0 {
+		return fmt.Sprintf("(pokemon == %d && form in %d..%d)", s, rng.Intn(3), rng.Intn(3))
+	}
+	return fmt.Sprintf("(pokemon == %d && form %s %d)", s, pick(rng, genOps), rng.Intn(3))
 }
 
 func genExpr(rng *rand.Rand, depth int) string {

@@ -120,7 +120,7 @@ func (l *lowerer) comparison(v *ast.BinaryNode) (node, error) {
 	}
 	if f.isSpecies() {
 		if op != "==" && op != "!=" {
-			return nil, errorf(l.pos(fieldSide), "%s supports ==, !=, in and not in only", f)
+			return speciesRange(f, rangeFromOp(f, op, val), l.pos(fieldSide)), nil
 		}
 		return l.speciesLit(f, op == "!=", []int{val}, l.pos(fieldSide), []Position{l.pos(valueSide)})
 	}
@@ -170,9 +170,6 @@ func (l *lowerer) membership(v *ast.BinaryNode) (node, error) {
 		return &rangeLit{f: f, set: setOf(ivs...).intersect(intervalSet{domains[f]}), pos: pos}, nil
 	case *ast.BinaryNode:
 		if r.Operator == ".." {
-			if f.isSpecies() {
-				return nil, errorf(pos, "%s supports a list, not a range", f)
-			}
 			lo, err := l.intLit(r.Left)
 			if err != nil {
 				return nil, err
@@ -181,7 +178,11 @@ func (l *lowerer) membership(v *ast.BinaryNode) (node, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &rangeLit{f: f, set: setOf(interval{lo, hi}).intersect(intervalSet{domains[f]}), pos: pos}, nil
+			set := setOf(interval{lo, hi}).intersect(intervalSet{domains[f]})
+			if f.isSpecies() {
+				return speciesRange(f, set, pos), nil
+			}
+			return &rangeLit{f: f, set: set, pos: pos}, nil
 		}
 	}
 	return nil, errorf(l.pos(v.Right), "expected a list or a range after in")
@@ -230,6 +231,23 @@ func (l *lowerer) speciesLit(f field, neg bool, vals []int, pos Position, valPos
 		}
 	}
 	return &idLit{f: f, ids: idsOf(vals...), neg: neg, pos: pos}, nil
+}
+
+// speciesRange lowers an interval set over pokemon or form (already within
+// the field's domain) to the equivalent id set: its members when they are
+// at most half the domain, otherwise the negation of the complement's
+// members, so pokemon > 5 becomes !pokemon{1..5}. An empty set becomes a
+// positive empty id set, which can never hold.
+func speciesRange(f field, set intervalSet, pos Position) node {
+	d := domains[f]
+	count := 0
+	for _, iv := range set {
+		count += iv.hi - iv.lo + 1
+	}
+	if 2*count <= d.hi-d.lo+1 {
+		return &idLit{f: f, ids: idSet(set.values()), pos: pos}
+	}
+	return &idLit{f: f, ids: idSet(set.complement(d).values()), neg: true, pos: pos}
 }
 
 // rangeFromOp is the set of domain values v' with v' op v.

@@ -49,6 +49,11 @@ func TestCompileGolden(t *testing.T) {
 			`[{"gender":[-1,0,1,3]}]`},
 		{`atk == 15 && def == 15 && sta == 15 && level >= 30 && cp in 1500..2500`,
 			`[{"atk_iv":{"min":15,"max":15},"def_iv":{"min":15,"max":15},"sta_iv":{"min":15,"max":15},"level":{"min":30,"max":127},"cp":{"min":1500,"max":2500}}]`},
+		// species ranges and comparisons lower to id sets
+		{`pokemon in 1..3 && iv == 100`,
+			`[{"pokemon":[{"id":1},{"id":2},{"id":3}],"iv":{"min":100,"max":100}}]`},
+		{`pokemon > 5 && iv == 100`,
+			`[{"iv":{"min":100,"max":100}},{"pokemon":[{"id":1}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":2}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":3}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":4}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":5}],"iv":{"min":1,"max":0}}]`},
 		// unsatisfiable: no clause, and no key (a key would block)
 		{`pokemon == 1 && iv > 100`, `[]`},
 		{`iv >= 90 && iv < 50`, `[]`},
@@ -77,6 +82,11 @@ func TestCompileErrorsAndLimits(t *testing.T) {
 	if _, err := Compile(`iv != 1 && level != 1`, WithMaxConjunctions(2)); err == nil ||
 		err.Error() != "1:1: expression expands to more than 2 conjunctions; simplify it" {
 		t.Errorf("conjunction limit: err = %v", err)
+	}
+	// a species range too large to negate hits the key cap
+	if _, err := Compile(`pokemon in 1..15000 && iv == 100`); err == nil ||
+		err.Error() != "1:1: expression names more than 10000 species/form keys; simplify it" {
+		t.Errorf("species range: err = %v", err)
 	}
 }
 

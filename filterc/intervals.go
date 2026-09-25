@@ -56,7 +56,8 @@ func (s intervalSet) complement(dom interval) intervalSet {
 	return setOf(out...)
 }
 
-// values enumerates the members; only used for small domains (gender).
+// values enumerates the members: gender lists, and species/form id sets
+// of at most half their domain.
 func (s intervalSet) values() []int {
 	var out []int
 	for _, iv := range s {

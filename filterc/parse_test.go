@@ -20,6 +20,19 @@ func TestParseLowers(t *testing.T) {
 		{"!(iv >= 90) || great <= 100 && cp == 1500", "or(not(iv{[90,100]}),and(great{[1,100]},cp{[1500,1500]}))"},
 		{"not (great <= 100)", "not(great{[1,100]})"},
 		{"great == 4096", "great{[4096,4096]}"},
+		// ranges and comparisons on pokemon/form lower to id sets: the members
+		// when at most half the domain, else the negated complement
+		{"pokemon < 5", "pokemon{1,2,3,4}"},
+		{"pokemon in 1..5", "pokemon{1,2,3,4,5}"},
+		{"pokemon > 5", "!pokemon{1,2,3,4,5}"},
+		{"pokemon == 1 && form > 0", "and(pokemon{1},!form{0})"},
+		{"5 > pokemon", "pokemon{1,2,3,4}"},
+		{"pokemon in 0..3", "pokemon{1,2,3}"},
+		{"pokemon not in 1..3", "not(pokemon{1,2,3})"},
+		{"pokemon >= 1", "!pokemon{}"},
+		{"pokemon > 32767", "pokemon{}"},
+		{"pokemon in 5..1", "pokemon{}"},
+		{"form <= 2", "form{0,1,2}"},
 	}
 	for _, c := range cases {
 		n, err := parse(c.src)
@@ -44,8 +57,6 @@ func TestParseErrors(t *testing.T) {
 		{"iv", "1:1: expected a comparison"},
 		{"not great <= 100", "1:1: not binds tighter than <=; write not (…)"},
 		{"pokemon == 0", `1:12: pokemon 0 is not a species id; leave pokemon unconstrained for "everything else"`},
-		{"pokemon < 5", "1:1: pokemon supports ==, !=, in and not in only"},
-		{"pokemon in 1..5", "1:1: pokemon supports a list, not a range"},
 		{"form == -1", "1:9: form -1 is out of range 0..32767"},
 		{"iv == 99999999", "1:7: integer 99999999 is out of range"},
 		{"iv ?? 1", `1:4: unsupported operator "??"`},
