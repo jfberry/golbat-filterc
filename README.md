@@ -30,14 +30,14 @@ go install github.com/jfberry/golbat-filterc/cmd/filterc@latest
 filterc compile 'size == 5 && pokemon != 710'
 filterc compile --min-lat 51.4 --min-lon -0.2 --max-lat 51.6 --max-lon 0.1 --limit 300 'iv == 100'
 filterc scan --golbat http://127.0.0.1:9001 --secret … 'iv == 100 || (pokemon == 1 && gender == 2)'
-filterc serve --listen :8080
+filterc serve --listen 127.0.0.1:8080
 ```
 
 `filterc.toml` (in the working directory or `$XDG_CONFIG_HOME/filterc/`)
 holds the defaults; flags override it:
 
 ```toml
-listen = ":8080"
+listen = "127.0.0.1:8080"
 
 [golbat]
 url    = "http://127.0.0.1:9001"
@@ -49,8 +49,12 @@ max = { lat = 51.6, lon = 0.1 }
 limit = 300
 ```
 
+Unknown keys in the file are an error.
+
 The server has no authentication of its own; `/scan` runs scans with the
-configured secret, so keep it on a private interface.
+configured secret, so keep it on a private interface. It listens on
+`127.0.0.1:8080` by default; pass `--listen` (e.g. `--listen :8080`) only if
+you deliberately want it reachable from other hosts.
 
 - `POST /compile` `{"expression": "…", "bounds"?: {"min", "max"}, "limit"?: n}` → `{"request": {…}, "warnings": […]}`
 - `POST /scan` — the same, plus `"response"`: Golbat's reply
@@ -62,6 +66,9 @@ Fields: `pokemon`, `form`, `iv`, `atk`, `def`, `sta`, `level`, `cp`,
 `gender`, `size`, `little`, `great`, `ultra`. Operators: `== != < <= > >=`,
 `in [..]`, `not in`, `a..b` ranges, `&& || !` (or `and or not`), parentheses.
 Integers only. A form literal needs a `pokemon` id in the same conjunction.
+Ranges and comparisons work on `pokemon` and `form` too (`pokemon in 1..151`,
+`pokemon > 5`, `form > 0`) and compile to the equivalent id set; a very large
+set hits the key cap (10,000 species/form keys by default).
 
 Semantics follow Golbat's matcher exactly, which the property test in
 `filterc/property_test.go` checks: `-1` is a real value ("no encounter

@@ -67,7 +67,7 @@ parser and type checker are used, its VM is not.
 |---|---|
 | comparison | `iv >= 90`, `pokemon == 1`, `gender != 2` |
 | membership | `pokemon in [1, 4, 7]`, `gender not in [0, 3]` |
-| range membership | `iv in 90..100`, `level not in 1..29` |
+| range membership | `iv in 90..100`, `level not in 1..29`, `pokemon in 1..151` |
 | conjunction, disjunction, negation | `&&`, `\|\|`, `!` (also `and`, `or`, `not`) |
 | grouping | `( … )` |
 | literals | decimal integers, possibly negative |
@@ -87,7 +87,7 @@ applies to compiled output.
 
 | Field | Domain | Notes |
 |---|---|---|
-| `pokemon` | 1..32767 | 0 and negatives are rejected; forms belong to a species |
+| `pokemon` | 1..32767 | 0 and negatives are rejected as ids (ranges are clipped); forms belong to a species |
 | `form` | 0..32767 | 0 is "no form sent", Golbat's default |
 | `iv` | −1..100 | −1 = no encounter data |
 | `atk`, `def`, `sta` | −1..15 | −1 = no encounter data |
@@ -172,7 +172,11 @@ keys. `iv != 50` becomes two generic clauses (`-1..49`, `51..100`).
    for range fields an *interval set* over the domain (a sorted list of
    disjoint closed intervals); for `gender` a value set; for `pokemon` and
    `form` an id set with a negated flag. `in`, `not in`, ranges and all six
-   comparison operators reduce to these.
+   comparison operators reduce to these. On `pokemon`/`form` a range or an
+   ordering comparison is first an interval set within the domain (values
+   below it are clipped, so `pokemon in 0..5` is 1..5), then an id set: its
+   members when they are at most half the domain, otherwise the negated
+   complement (`pokemon > 5` is ¬{1..5}). Very large sets hit the key cap.
 3. **Negation normal form.** `!` is pushed to the literals with De Morgan;
    on a literal it is the complement within the field's domain (intervals →
    complementary intervals; species/form → flip the flag).
@@ -230,8 +234,8 @@ at scan time and Golbat never has to merge anything.
 any. Then, for each distinguished key with an empty bucket, the block clause
 `{"pokemon": [key], "iv": {"min": 1, "max": 0}}`, which can never hold and
 so stops the fallback from applying anything to that key. Output size is at
-most 2 × conjunctions + |D| clauses; identical conditions for many keys cost
-one clause.
+most 2 × conjunctions + |D| clauses, with |D| at most the key cap;
+identical conditions for many keys cost one clause.
 
 Worked check for `iv == 100 || (pokemon == 1 && gender == 2)`: c₁ has
 S⁺ = ANY, c₂ has S⁺ = {1}; D = {(1, any)}; generic = {c₁}; bucket(1, any) =
@@ -240,9 +244,16 @@ clause. That is the second example above.
 
 ### Limits
 
-Defaults, overridable by option: 512 conjunctions after splitting; 10,000
-emitted clauses; 64 KiB of expression text; parse depth as Expr's default.
-Exceeding one is an error naming the limit. The server also caps request
+Defaults, overridable by option: 512 conjunctions after splitting
+(`WithMaxConjunctions`); 10,000 distinguished `(species, form)` keys
+(`WithMaxKeys`); 10,000 emitted clauses (`WithMaxClauses`); 64 KiB of
+expression text; parse depth as Expr's default. Every cap is checked before
+the allocation it guards — split refuses a field's product before building
+it, the key cap trips while D is collected (before any bucket is computed),
+and the clause cap as each clause is appended — so the output is bounded by
+2 × conjunctions + |D| with |D| ≤ the key cap. Exceeding one is an error
+naming the limit (`expression expands to more than N conjunctions`,
+`names more than N species/form keys`, `compiles to more than N clauses`). The server also caps request
 body size. An expression with no satisfiable conjunction compiles to an empty
 `filters` list and a warning that it matches nothing.
 
@@ -265,6 +276,7 @@ package filterc
 func Compile(expression string, opts ...Option) (*Compiled, error)
 func WithMaxConjunctions(n int) Option
 func WithMaxClauses(n int) Option
+func WithMaxKeys(n int) Option
 
 type Compiled struct {
     Filters  []Clause // v3 wire shape, json tags as the API expects
@@ -316,7 +328,7 @@ address and, if Golbat requires one, the secret.
 Config file (TOML):
 
 ```toml
-listen = ":8080"
+listen = "127.0.0.1:8080"
 
 [golbat]
 url    = "http://127.0.0.1:9001"
@@ -341,8 +353,9 @@ Server endpoints:
   413 over the body cap.
 
 The server has no authentication of its own: it is a local tool, and
-exposing it would expose the configured secret's scan capability. The README
-says so.
+exposing it would expose the configured secret's scan capability, so it
+listens on loopback by default. The README says so. Unknown config keys are
+an error, so a misspelled `secret` is not silently ignored.
 
 ## Testing
 
@@ -402,6 +415,10 @@ cmd/filterc/        main.go  config.go  serve.go
 docs/superpowers/specs/  this document, then the implementation plan
 README.md  LICENSE (Unlicense, as Golbat)
 ```
+
+As built, `domains.go` (field table and domains) and `types.go` (the v3 wire
+types and `Request`) stand in for the planned `internal/model`, `emit.go` and
+`request.go` split, and lowering lives in `parse.go`.
 
 ## Decisions recorded
 
