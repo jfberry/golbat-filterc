@@ -135,24 +135,51 @@ func tooManyClauses(limit int) *Error {
 }
 
 // distinguishedKeys collects the (species, form) keys the conjunctions
-// name. The count is summed from interval sizes and checked against maxKeys
-// before any key is enumerated.
-func distinguishedKeys(plans []keyPlan, maxKeys int) ([]key, error) {
-	total := 0
+// name, refusing before any key is enumerated when interval sizes already
+// prove a cap is exceeded:
+//
+//   - a conjunction naming more than maxKeys keys has more than maxKeys
+//     distinct keys;
+//   - a conjunction whose species small side is positive lists every key it
+//     names in its own clause, so the sum of those counts is a lower bound
+//     on the emitted pokemon entries (negative small sides are left out:
+//     their keys may be shared, or become single block entries).
+//
+// Otherwise keys are enumerated conjunction by conjunction into a
+// deduplicated set, refusing as soon as the distinct count exceeds maxKeys,
+// so the work is bounded by conjunctions × maxKeys.
+func distinguishedKeys(plans []keyPlan, maxKeys, maxIds int) ([]key, error) {
+	listed := 0
 	for _, p := range plans {
-		total += p.keyCount()
-		if total > maxKeys {
+		n := p.keyCount()
+		if n > maxKeys {
 			return nil, tooManyKeys(maxKeys)
 		}
+		if p.c.has[fPokemon] && !p.speciesNeg {
+			if listed += n; listed > maxIds {
+				return nil, tooManyIds(maxIds)
+			}
+		}
 	}
-	keys := make([]key, 0, total)
+	seen := map[key]struct{}{}
+	var keys, buf []key
 	for _, p := range plans {
-		keys = p.appendKeys(keys)
+		buf = p.appendKeys(buf[:0])
+		for _, k := range buf {
+			if _, dup := seen[k]; dup {
+				continue
+			}
+			seen[k] = struct{}{}
+			if len(seen) > maxKeys {
+				return nil, tooManyKeys(maxKeys)
+			}
+			keys = append(keys, k)
+		}
 	}
 	slices.SortFunc(keys, func(a, b key) int {
 		return cmp.Or(cmp.Compare(a.species, b.species), cmp.Compare(a.form, b.form))
 	})
-	return slices.Compact(keys), nil
+	return keys, nil
 }
 
 func tooManyIds(limit int) *Error {
@@ -175,7 +202,7 @@ func dispatchCapped(conjs []conjunction, maxClauses, maxKeys, maxIds int) ([]Cla
 	for i, c := range conjs {
 		plans[i] = planFor(c)
 	}
-	keys, err := distinguishedKeys(plans, maxKeys)
+	keys, err := distinguishedKeys(plans, maxKeys, maxIds)
 	if err != nil {
 		return nil, err
 	}

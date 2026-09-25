@@ -218,12 +218,15 @@ names, drawn from small sides only:
   `(s, any)` when F(c) is ANY;
 - S(c) with a negative small side Sᶜ: `(s, any)` for each s ∈ Sᶜ.
 
-**The key cap is checked before enumeration**: the per-conjunction key
-counts are summed from interval sizes, and if the sum exceeds the cap the
-compile fails without enumerating a key. Only then is the (deduplicated,
-sorted) key set materialised. So `pokemon > 20000 && pokemon < 20010`
-names nine keys, and a thousand copies of `pokemon in 1..16383` are
-refused in constant memory.
+**The key cap counts distinct keys, with pre-checks from interval sizes**:
+a conjunction naming more than the key cap by size is refused at once; the
+sizes of conjunctions whose species small side is positive (whose keys all
+appear in their own clause) are summed and refused over the id cap; only
+then are keys enumerated conjunction by conjunction into a deduplicated
+set, refused as soon as the distinct count exceeds the key cap. So
+`pokemon > 20000 && pokemon < 20010` names nine keys, a thousand copies of
+`pokemon in 1..16383` are refused without enumerating an id, and the work
+is bounded by conjunctions × the key cap.
 
 **Buckets.** A key's bucket is the set of conjunctions that apply to a
 representative pokemon of that key:
@@ -267,11 +270,15 @@ allocation it bounds:
 | cap | default | option | checked |
 |-----|---------|--------|---------|
 | conjunctions after splitting | 512 | `WithMaxConjunctions` | as DNF forms conjunctions; split refuses a field's product before building it |
-| distinguished `(species, form)` keys | 10,000 | `WithMaxKeys` | summed from interval sizes before any key is enumerated or bucket computed |
-| pokemon entries across all clauses, blocks included | 100,000 | `WithMaxIds` | before each entry is appended |
+| distinct `(species, form)` keys | 10,000 | `WithMaxKeys` | per conjunction from interval sizes before enumeration, then on the distinct count as keys are collected (before any bucket is computed) |
+| pokemon entries across all clauses, blocks included | 100,000 | `WithMaxIds` | from the summed sizes of positive species small sides before enumeration, then before each entry is appended |
 | emitted clauses | 10,000 | `WithMaxClauses` | before each clause is appended |
 
-So the output is bounded by 2 × conjunctions + |D| clauses **and** by the id
+In one sentence: a conjunction whose own key count exceeds the key cap, or
+positive-small-side key counts summing past the id cap, are refused from
+interval sizes before anything is enumerated; otherwise keys are collected
+into a deduplicated set and refused once the distinct count exceeds the key
+cap. So the output is bounded by 2 × conjunctions + |D| clauses **and** by the id
 cap in pokemon entries: every generic conjunction repeats every key it
 applies to, so without the id cap a small expression (`pokemon in 1..10000`
 beside a few hundred generic conjunctions) could ask for millions of

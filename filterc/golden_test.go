@@ -186,6 +186,77 @@ func TestIdCapRefusesBeforeBuilding(t *testing.T) {
 	}
 }
 
+// The key cap counts distinct keys: 101 conjunctions after the split each
+// name the same 100 species, which is 100 keys, not 10,100.
+func TestKeyCapCountsDistinctKeys(t *testing.T) {
+	c, err := Compile("pokemon in 1..100 && " + oddList("cp", 1, 201))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, entries := map[PokemonId]bool{}, 0
+	for _, cl := range c.Filters {
+		for _, p := range cl.Pokemon {
+			keys[p] = true
+			entries++
+		}
+	}
+	if len(c.Filters) != 101 || len(keys) != 100 || entries != 10100 {
+		t.Errorf("%d clauses, %d distinct keys, %d entries; want 101, 100, 10100", len(c.Filters), len(keys), entries)
+	}
+}
+
+// Positive species small sides list their keys in their own clause, so
+// their summed counts refuse over the id cap before any key is enumerated.
+func TestIdCapPrecheckFromIntervalSizes(t *testing.T) {
+	src := "pokemon in 1..50 && cp in [1, 3, 5]" // 3 conjunctions × 50 keys
+	n, err := parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conjs, err := toDNF(nnf(n), DefaultMaxConjunctions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conjs, err = split(conjs, DefaultMaxConjunctions); err != nil {
+		t.Fatal(err)
+	}
+	plans := make([]keyPlan, len(conjs))
+	for i, c := range conjs {
+		plans[i] = planFor(c)
+	}
+	if _, err := distinguishedKeys(plans, DefaultMaxKeys, 100); err == nil ||
+		err.Error() != "1:1: expression emits more than 100 pokemon entries; simplify it" {
+		t.Errorf("precheck: err = %v", err)
+	}
+	if _, err := Compile(src, WithMaxIds(100)); err == nil ||
+		err.Error() != "1:1: expression emits more than 100 pokemon entries; simplify it" {
+		t.Errorf("compile: err = %v", err)
+	}
+}
+
+// Negative small sides are not counted towards the id pre-check: 20
+// conjunctions each excluding a different 8,000-id range name 160,000 keys
+// by size, but 8,019 distinct ones, emitted mostly as single blocks.
+func TestNegativeSmallSidesCompile(t *testing.T) {
+	parts := make([]string, 20)
+	for k := range parts {
+		parts[k] = fmt.Sprintf("(pokemon not in %d..%d && cp == %d)", 1+k, 8000+k, k)
+	}
+	c, err := Compile(strings.Join(parts, " || "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := map[PokemonId]bool{}
+	for _, cl := range c.Filters {
+		for _, p := range cl.Pokemon {
+			keys[p] = true
+		}
+	}
+	if len(keys) != 8019 {
+		t.Errorf("%d distinct keys, want 8019", len(keys))
+	}
+}
+
 // pokemon × form lists name N×M keys in one clause; the key cap must refuse
 // them while the key set is being built, not after the buckets are.
 func TestKeyCapRefusesBeforeBuilding(t *testing.T) {
