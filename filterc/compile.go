@@ -4,10 +4,11 @@ const (
 	DefaultMaxConjunctions = 512
 	DefaultMaxClauses      = 10000
 	DefaultMaxKeys         = 10000
+	DefaultMaxIds          = 100000
 )
 
 type options struct {
-	maxConjunctions, maxClauses, maxKeys int
+	maxConjunctions, maxClauses, maxKeys, maxIds int
 }
 
 // Option adjusts Compile's limits.
@@ -24,10 +25,14 @@ func WithMaxClauses(n int) Option { return func(o *options) { o.maxClauses = n }
 // expression names (default DefaultMaxKeys).
 func WithMaxKeys(n int) Option { return func(o *options) { o.maxKeys = n } }
 
+// WithMaxIds caps the total number of pokemon entries across all emitted
+// clauses, block clauses included (default DefaultMaxIds).
+func WithMaxIds(n int) Option { return func(o *options) { o.maxIds = n } }
+
 // Compile turns an expression into v3 filter clauses. Errors are *Error
 // with a position.
 func Compile(expression string, opts ...Option) (*Compiled, error) {
-	o := options{maxConjunctions: DefaultMaxConjunctions, maxClauses: DefaultMaxClauses, maxKeys: DefaultMaxKeys}
+	o := options{maxConjunctions: DefaultMaxConjunctions, maxClauses: DefaultMaxClauses, maxKeys: DefaultMaxKeys, maxIds: DefaultMaxIds}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -45,7 +50,7 @@ func Compile(expression string, opts ...Option) (*Compiled, error) {
 	if err := validate(conjs); err != nil {
 		return nil, err
 	}
-	clauses, err := dispatch(conjs, o.maxClauses, o.maxKeys)
+	clauses, err := dispatchCapped(conjs, o.maxClauses, o.maxKeys, o.maxIds)
 	if err != nil {
 		return nil, err
 	}

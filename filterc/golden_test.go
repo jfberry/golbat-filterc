@@ -127,6 +127,65 @@ func TestCompileCapBoundaries(t *testing.T) {
 	}
 }
 
+// The id cap counts pokemon entries across every clause, blocks included,
+// and passes at count == cap.
+func TestCompileIdCapBoundaries(t *testing.T) {
+	const threeIds = `pokemon in [1, 2, 3] && iv == 100`
+	if _, err := Compile(threeIds, WithMaxIds(3)); err != nil {
+		t.Errorf("ids == cap: %v", err)
+	}
+	if _, err := Compile(threeIds, WithMaxIds(2)); err == nil ||
+		err.Error() != "1:1: expression emits more than 2 pokemon entries; simplify it" {
+		t.Errorf("ids > cap: err = %v", err)
+	}
+	// three block clauses, one entry each
+	const threeBlocks = `pokemon != 1 && pokemon != 2 && pokemon != 3`
+	if _, err := Compile(threeBlocks, WithMaxIds(3)); err != nil {
+		t.Errorf("block ids == cap: %v", err)
+	}
+	if _, err := Compile(threeBlocks, WithMaxIds(2)); err == nil ||
+		err.Error() != "1:1: expression emits more than 2 pokemon entries; simplify it" {
+		t.Errorf("block ids > cap: err = %v", err)
+	}
+	// keyed and generic entries together: 2 keys in the keyed clause, then
+	// the generic conjunction's keyed copy lists both again
+	const fourIds = `pokemon in [1, 2] || iv == 100`
+	if _, err := Compile(fourIds, WithMaxIds(4)); err != nil {
+		t.Errorf("mixed ids == cap: %v", err)
+	}
+	if _, err := Compile(fourIds, WithMaxIds(3)); err == nil ||
+		err.Error() != "1:1: expression emits more than 3 pokemon entries; simplify it" {
+		t.Errorf("mixed ids > cap: err = %v", err)
+	}
+}
+
+// Every generic conjunction repeats every key, so a few hundred bytes can
+// ask for millions of entries; the id cap must refuse while clauses are
+// built. Here 10,000 keys meet 100 generic conjunctions.
+func TestIdCapRefusesBeforeBuilding(t *testing.T) {
+	src := "pokemon in 1..10000 || " + oddList("cp", 1, 199)
+	n, err := parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conjs, err := toDNF(nnf(n), DefaultMaxConjunctions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conjs, err = split(conjs, DefaultMaxConjunctions); err != nil {
+		t.Fatal(err)
+	}
+	bytes := allocDuring(func() {
+		_, err = dispatchCapped(conjs, DefaultMaxClauses, DefaultMaxKeys, DefaultMaxIds)
+	})
+	if err == nil || err.Error() != fmt.Sprintf("1:1: expression emits more than %d pokemon entries; simplify it", DefaultMaxIds) {
+		t.Errorf("err = %v", err)
+	}
+	if bytes > 16<<20 {
+		t.Errorf("dispatch allocated %d MiB before refusing", bytes>>20)
+	}
+}
+
 // pokemon × form lists name N×M keys in one clause; the key cap must refuse
 // them while the key set is being built, not after the buckets are.
 func TestKeyCapRefusesBeforeBuilding(t *testing.T) {

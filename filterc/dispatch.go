@@ -155,11 +155,22 @@ func distinguishedKeys(plans []keyPlan, maxKeys int) ([]key, error) {
 	return slices.Compact(keys), nil
 }
 
-// dispatch computes, per (species, form) key the expression names, the
-// conjunctions Golbat's probe order (exact, then species, then everything
-// else) would select for it, and emits clauses so that no group needs to
-// inherit from another at scan time.
+func tooManyIds(limit int) *Error {
+	return errorf(Position{Line: 1, Column: 1}, "expression emits more than %d pokemon entries; simplify it", limit)
+}
+
+// dispatch is dispatchCapped with the default pokemon-entry cap.
 func dispatch(conjs []conjunction, maxClauses, maxKeys int) ([]Clause, error) {
+	return dispatchCapped(conjs, maxClauses, maxKeys, DefaultMaxIds)
+}
+
+// dispatchCapped computes, per (species, form) key the expression names,
+// the conjunctions Golbat's probe order (exact, then species, then
+// everything else) would select for it, and emits clauses so that no group
+// needs to inherit from another at scan time. Every generic conjunction
+// lists every key it applies to, so the emitted pokemon entries are capped
+// at maxIds as they are appended, block clauses included.
+func dispatchCapped(conjs []conjunction, maxClauses, maxKeys, maxIds int) ([]Clause, error) {
 	plans := make([]keyPlan, len(conjs))
 	for i, c := range conjs {
 		plans[i] = planFor(c)
@@ -177,6 +188,14 @@ func dispatch(conjs []conjunction, maxClauses, maxKeys int) ([]Clause, error) {
 		clauses = append(clauses, cl)
 		return nil
 	}
+	ids := 0
+	addId := func() error {
+		if ids >= maxIds {
+			return tooManyIds(maxIds)
+		}
+		ids++
+		return nil
+	}
 	used := make(map[key]bool, len(keys))
 	for _, p := range plans {
 		if p.generic {
@@ -184,21 +203,27 @@ func dispatch(conjs []conjunction, maxClauses, maxKeys int) ([]Clause, error) {
 				return nil, err
 			}
 		}
-		var ids []PokemonId
+		var list []PokemonId
 		for _, k := range keys {
 			if p.applies(k) {
-				ids = append(ids, k.pokemonId())
+				if err := addId(); err != nil {
+					return nil, err
+				}
+				list = append(list, k.pokemonId())
 				used[k] = true
 			}
 		}
-		if len(ids) > 0 {
-			if err := emit(clauseFor(p.c, ids)); err != nil {
+		if len(list) > 0 {
+			if err := emit(clauseFor(p.c, list)); err != nil {
 				return nil, err
 			}
 		}
 	}
 	for _, k := range keys {
 		if !used[k] {
+			if err := addId(); err != nil {
+				return nil, err
+			}
 			if err := emit(blockClause(k)); err != nil {
 				return nil, err
 			}
