@@ -71,6 +71,7 @@ func TestDNFErrors(t *testing.T) {
 		{"!(pokemon == 1 && form == 0)", 512, "1:19: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
 		{"(iv == 1 || iv == 2) && (level == 1 || level == 2) && (cp == 1 || cp == 2)", 4, "1:1: expression expands to more than 4 clauses; simplify it"},
 		{"iv != 1 && level != 1 && cp != 1", 4, "1:1: expression expands to more than 4 clauses; simplify it"},
+		{"(iv != 1 && level != 1) || cp == 5", 4, "1:1: expression expands to more than 4 clauses; simplify it"},
 	}
 	for _, c := range cases {
 		_, err := pipeline(t, c.src, c.maxConj)

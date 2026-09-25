@@ -201,6 +201,9 @@ func split(conjs []conjunction, maxConj int) ([]conjunction, error) {
 			}
 		}
 		out = append(out, parts...)
+		if len(out) > maxConj {
+			return nil, tooMany(maxConj)
+		}
 	}
 	return out, nil
 }
