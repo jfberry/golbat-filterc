@@ -49,6 +49,8 @@ func TestParseErrors(t *testing.T) {
 		{"form == -1", "1:9: form -1 is out of range 0..32767"},
 		{"iv == 99999999", "1:7: integer 99999999 is out of range"},
 		{"iv ?? 1", `1:4: unsupported operator "??"`},
+		{"pokemon in [1, 0, 5]", `1:16: pokemon 0 is not a species id; leave pokemon unconstrained for "everything else"`},
+		{"form in [3, 40000, 7]", "1:13: form 40000 is out of range 0..32767"},
 	}
 	for _, c := range cases {
 		_, err := parse(c.src)
@@ -69,5 +71,29 @@ func TestParseRejectsLongExpression(t *testing.T) {
 	}
 	if _, err := parse(string(src)); err == nil {
 		t.Error("expected an error for an over-long expression")
+	}
+}
+
+// Offsets are bytes while columns stay rune-based: the é before each error
+// is two bytes but one column.
+func TestParseErrorPositionsNonASCII(t *testing.T) {
+	cases := []struct {
+		src  string
+		want Position
+	}{
+		{"/* é */ x == 1", Position{Line: 1, Column: 9, Offset: 9}},
+		{"/* é */ iv == 1.5", Position{Line: 1, Column: 15, Offset: 15}},
+		{"/* é */ iv == 1 )", Position{Line: 1, Column: 17, Offset: 17}},
+	}
+	for _, c := range cases {
+		_, err := parse(c.src)
+		e, ok := err.(*Error)
+		if !ok {
+			t.Errorf("%q: error %v, want *Error", c.src, err)
+			continue
+		}
+		if e.Pos != c.want {
+			t.Errorf("%q: position %+v, want %+v (%s)", c.src, e.Pos, c.want, e.Msg)
+		}
 	}
 }

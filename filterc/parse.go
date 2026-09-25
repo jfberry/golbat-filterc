@@ -22,20 +22,23 @@ func parse(src string) (node, error) {
 	tree, err := parser.Parse(src)
 	if err != nil {
 		if fe, ok := err.(*file.Error); ok {
-			return nil, &Error{Msg: fe.Message, Pos: Position{Line: fe.Line, Column: fe.Column + 1, Offset: fe.From}}
+			return nil, &Error{Msg: fe.Message, Pos: Position{Line: fe.Line, Column: fe.Column + 1, Offset: byteOffset(src, fe.From)}}
 		}
 		return nil, &Error{Msg: err.Error(), Pos: Position{Line: 1, Column: 1}}
 	}
-	l := lowerer{src: tree.Source}
+	l := lowerer{src: tree.Source, raw: src}
 	return l.boolean(tree.Node)
 }
 
-type lowerer struct{ src file.Source }
+type lowerer struct {
+	src file.Source
+	raw string
+}
 
 func (l *lowerer) pos(n ast.Node) Position {
 	e := &file.Error{Location: n.Location()}
 	e.Bind(l.src)
-	return Position{Line: e.Line, Column: e.Column + 1, Offset: n.Location().From}
+	return Position{Line: e.Line, Column: e.Column + 1, Offset: byteOffset(l.raw, n.Location().From)}
 }
 
 func (l *lowerer) boolean(n ast.Node) (node, error) {
@@ -119,7 +122,7 @@ func (l *lowerer) comparison(v *ast.BinaryNode) (node, error) {
 		if op != "==" && op != "!=" {
 			return nil, errorf(l.pos(fieldSide), "%s supports ==, !=, in and not in only", f)
 		}
-		return l.speciesLit(f, op == "!=", []int{val}, l.pos(fieldSide), l.pos(valueSide))
+		return l.speciesLit(f, op == "!=", []int{val}, l.pos(fieldSide), []Position{l.pos(valueSide)})
 	}
 	return &rangeLit{f: f, set: rangeFromOp(f, op, val), pos: l.pos(fieldSide)}, nil
 }
@@ -148,14 +151,14 @@ func (l *lowerer) membership(v *ast.BinaryNode) (node, error) {
 	switch r := v.Right.(type) {
 	case *ast.ArrayNode:
 		vals := make([]int, 0, len(r.Nodes))
-		valPos := pos
+		valPos := make([]Position, 0, len(r.Nodes))
 		for _, e := range r.Nodes {
 			val, err := l.intLit(e)
 			if err != nil {
 				return nil, err
 			}
 			vals = append(vals, val)
-			valPos = l.pos(e)
+			valPos = append(valPos, l.pos(e))
 		}
 		if f.isSpecies() {
 			return l.speciesLit(f, false, vals, pos, valPos)
@@ -215,14 +218,15 @@ func (l *lowerer) intLit(n ast.Node) (int, error) {
 	return val, nil
 }
 
-func (l *lowerer) speciesLit(f field, neg bool, vals []int, pos, valPos Position) (node, error) {
+// speciesLit validates each id at its own position (valPos parallels vals).
+func (l *lowerer) speciesLit(f field, neg bool, vals []int, pos Position, valPos []Position) (node, error) {
 	d := domains[f]
-	for _, v := range vals {
+	for i, v := range vals {
 		if f == fPokemon && v < 1 {
-			return nil, errorf(valPos, `pokemon %d is not a species id; leave pokemon unconstrained for "everything else"`, v)
+			return nil, errorf(valPos[i], `pokemon %d is not a species id; leave pokemon unconstrained for "everything else"`, v)
 		}
 		if v < d.lo || v > d.hi {
-			return nil, errorf(valPos, "%s %d is out of range %d..%d", f, v, d.lo, d.hi)
+			return nil, errorf(valPos[i], "%s %d is out of range %d..%d", f, v, d.lo, d.hi)
 		}
 	}
 	return &idLit{f: f, ids: idsOf(vals...), neg: neg, pos: pos}, nil
@@ -247,4 +251,17 @@ func rangeFromOp(f field, op string, v int) intervalSet {
 		raw = interval{v, d.hi}
 	}
 	return setOf(raw).intersect(intervalSet{d})
+}
+
+// byteOffset converts Expr's rune offset into src to a byte offset, clamped
+// to the end of the source.
+func byteOffset(src string, runeOff int) int {
+	n := 0
+	for i := range src {
+		if n == runeOff {
+			return i
+		}
+		n++
+	}
+	return len(src)
 }
