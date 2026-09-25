@@ -3,10 +3,11 @@ package filterc
 const (
 	DefaultMaxConjunctions = 512
 	DefaultMaxClauses      = 10000
+	DefaultMaxKeys         = 10000
 )
 
 type options struct {
-	maxConjunctions, maxClauses int
+	maxConjunctions, maxClauses, maxKeys int
 }
 
 // Option adjusts Compile's limits.
@@ -19,10 +20,14 @@ func WithMaxConjunctions(n int) Option { return func(o *options) { o.maxConjunct
 // WithMaxClauses caps the number of emitted clauses (default DefaultMaxClauses).
 func WithMaxClauses(n int) Option { return func(o *options) { o.maxClauses = n } }
 
+// WithMaxKeys caps the number of distinguished (species, form) keys the
+// expression names (default DefaultMaxKeys).
+func WithMaxKeys(n int) Option { return func(o *options) { o.maxKeys = n } }
+
 // Compile turns an expression into v3 filter clauses. Errors are *Error
 // with a position.
 func Compile(expression string, opts ...Option) (*Compiled, error) {
-	o := options{maxConjunctions: DefaultMaxConjunctions, maxClauses: DefaultMaxClauses}
+	o := options{maxConjunctions: DefaultMaxConjunctions, maxClauses: DefaultMaxClauses, maxKeys: DefaultMaxKeys}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -40,7 +45,7 @@ func Compile(expression string, opts ...Option) (*Compiled, error) {
 	if err := validate(conjs); err != nil {
 		return nil, err
 	}
-	clauses, err := dispatch(conjs, o.maxClauses)
+	clauses, err := dispatch(conjs, o.maxClauses, o.maxKeys)
 	if err != nil {
 		return nil, err
 	}

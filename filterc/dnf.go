@@ -53,7 +53,7 @@ func (c conjunction) String() string {
 }
 
 func tooMany(limit int) *Error {
-	return errorf(Position{Line: 1, Column: 1}, "expression expands to more than %d clauses; simplify it", limit)
+	return errorf(Position{Line: 1, Column: 1}, "expression expands to more than %d conjunctions; simplify it", limit)
 }
 
 // fromLit makes a conjunction of one literal; ok is false when it can never
@@ -187,7 +187,11 @@ func split(conjs []conjunction, maxConj int) ([]conjunction, error) {
 			if !c.has[f] || len(c.ranges[f]) <= 1 || field(f) == fGender {
 				continue
 			}
-			var next []conjunction
+			// refuse the product before building it
+			if len(out)+len(parts)*len(c.ranges[f]) > maxConj {
+				return nil, tooMany(maxConj)
+			}
+			next := make([]conjunction, 0, len(parts)*len(c.ranges[f]))
 			for _, p := range parts {
 				for _, iv := range c.ranges[f] {
 					q := p
@@ -196,9 +200,6 @@ func split(conjs []conjunction, maxConj int) ([]conjunction, error) {
 				}
 			}
 			parts = next
-			if len(out)+len(parts) > maxConj {
-				return nil, tooMany(maxConj)
-			}
 		}
 		out = append(out, parts...)
 		if len(out) > maxConj {

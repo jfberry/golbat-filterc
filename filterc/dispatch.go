@@ -59,40 +59,79 @@ func clauseFor(c conjunction, ids []PokemonId) Clause {
 	return cl
 }
 
-// dispatch computes, per (species, form) key the expression names, the
-// conjunctions Golbat's probe order (exact, then species, then everything
-// else) would select for it, and emits clauses so that no group needs to
-// inherit from another at scan time.
-func dispatch(conjs []conjunction, maxClauses int) ([]Clause, error) {
+func tooManyKeys(limit int) *Error {
+	return errorf(Position{Line: 1, Column: 1}, "expression names more than %d species/form keys; simplify it", limit)
+}
+
+func tooManyClauses(limit int) *Error {
+	return errorf(Position{Line: 1, Column: 1}, "expression compiles to more than %d clauses; simplify it", limit)
+}
+
+// distinguishedKeys collects the (species, form) keys the conjunctions name,
+// refusing as soon as there are more than maxKeys.
+func distinguishedKeys(conjs []conjunction, maxKeys int) ([]key, error) {
 	distinguished := map[key]struct{}{}
+	add := func(k key) error {
+		distinguished[k] = struct{}{}
+		if len(distinguished) > maxKeys {
+			return tooManyKeys(maxKeys)
+		}
+		return nil
+	}
 	for _, c := range conjs {
 		if c.hasSpecies {
 			for _, s := range c.speciesPos {
 				if c.hasForm {
 					for _, f := range c.formPos {
-						distinguished[key{s, f}] = struct{}{}
+						if err := add(key{s, f}); err != nil {
+							return nil, err
+						}
 					}
-				} else {
-					distinguished[key{s, anyForm}] = struct{}{}
+				} else if err := add(key{s, anyForm}); err != nil {
+					return nil, err
 				}
 				for _, f := range c.formNeg {
-					distinguished[key{s, f}] = struct{}{}
+					if err := add(key{s, f}); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
 		for _, s := range c.speciesNeg {
-			distinguished[key{s, anyForm}] = struct{}{}
+			if err := add(key{s, anyForm}); err != nil {
+				return nil, err
+			}
 		}
 	}
-	keys := slices.SortedFunc(maps.Keys(distinguished), func(a, b key) int {
+	return slices.SortedFunc(maps.Keys(distinguished), func(a, b key) int {
 		return cmp.Or(cmp.Compare(a.species, b.species), cmp.Compare(a.form, b.form))
-	})
+	}), nil
+}
+
+// dispatch computes, per (species, form) key the expression names, the
+// conjunctions Golbat's probe order (exact, then species, then everything
+// else) would select for it, and emits clauses so that no group needs to
+// inherit from another at scan time.
+func dispatch(conjs []conjunction, maxClauses, maxKeys int) ([]Clause, error) {
+	keys, err := distinguishedKeys(conjs, maxKeys)
+	if err != nil {
+		return nil, err
+	}
 
 	clauses := []Clause{}
+	emit := func(cl Clause) error {
+		if len(clauses) >= maxClauses {
+			return tooManyClauses(maxClauses)
+		}
+		clauses = append(clauses, cl)
+		return nil
+	}
 	used := make(map[key]bool, len(keys))
 	for _, c := range conjs {
 		if !c.hasSpecies {
-			clauses = append(clauses, clauseFor(c, nil))
+			if err := emit(clauseFor(c, nil)); err != nil {
+				return nil, err
+			}
 		}
 		var ids []PokemonId
 		for _, k := range keys {
@@ -102,16 +141,17 @@ func dispatch(conjs []conjunction, maxClauses int) ([]Clause, error) {
 			}
 		}
 		if len(ids) > 0 {
-			clauses = append(clauses, clauseFor(c, ids))
+			if err := emit(clauseFor(c, ids)); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for _, k := range keys {
 		if !used[k] {
-			clauses = append(clauses, blockClause(k))
+			if err := emit(blockClause(k)); err != nil {
+				return nil, err
+			}
 		}
-	}
-	if len(clauses) > maxClauses {
-		return nil, tooMany(maxClauses)
 	}
 	return clauses, nil
 }

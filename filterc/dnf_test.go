@@ -1,6 +1,8 @@
 package filterc
 
 import (
+	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -69,9 +71,9 @@ func TestDNFErrors(t *testing.T) {
 		{"form == 0", 512, "1:1: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
 		{"pokemon != 1 && form == 0", 512, "1:17: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
 		{"!(pokemon == 1 && form == 0)", 512, "1:19: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
-		{"(iv == 1 || iv == 2) && (level == 1 || level == 2) && (cp == 1 || cp == 2)", 4, "1:1: expression expands to more than 4 clauses; simplify it"},
-		{"iv != 1 && level != 1 && cp != 1", 4, "1:1: expression expands to more than 4 clauses; simplify it"},
-		{"(iv != 1 && level != 1) || cp == 5", 4, "1:1: expression expands to more than 4 clauses; simplify it"},
+		{"(iv == 1 || iv == 2) && (level == 1 || level == 2) && (cp == 1 || cp == 2)", 4, "1:1: expression expands to more than 4 conjunctions; simplify it"},
+		{"iv != 1 && level != 1 && cp != 1", 4, "1:1: expression expands to more than 4 conjunctions; simplify it"},
+		{"(iv != 1 && level != 1) || cp == 5", 4, "1:1: expression expands to more than 4 conjunctions; simplify it"},
 	}
 	for _, c := range cases {
 		_, err := pipeline(t, c.src, c.maxConj)
@@ -82,5 +84,55 @@ func TestDNFErrors(t *testing.T) {
 		if err.Error() != c.want {
 			t.Errorf("%q: error %q, want %q", c.src, err.Error(), c.want)
 		}
+	}
+}
+
+// allocDuring reports the bytes f allocates.
+func allocDuring(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// oddList renders "field in [lo, lo+2, ..., hi]": one interval per member.
+func oddList(f string, lo, hi int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s in [", f)
+	for v := lo; v <= hi; v += 2 {
+		if v > lo {
+			b.WriteString(",")
+		}
+		fmt.Fprint(&b, v)
+	}
+	b.WriteString("]")
+	return b.String()
+}
+
+// split must refuse a field's product before building it: the product here
+// is 459 × 4500 conjunctions (gigabytes), the cap 512.
+func TestSplitChecksCapBeforeBuilding(t *testing.T) {
+	src := oddList("iv", -1, 99) + " && " + oddList("atk", -1, 15) + " && " + oddList("cp", 1, 8999)
+	n, err := parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conjs, err := toDNF(nnf(n), 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes := allocDuring(func() { _, err = split(conjs, 512) })
+	if err == nil || err.Error() != "1:1: expression expands to more than 512 conjunctions; simplify it" {
+		t.Errorf("err = %v", err)
+	}
+	if bytes > 8<<20 {
+		t.Errorf("split allocated %d MiB before refusing", bytes>>20)
+	}
+	// small cap: 5 × 5 parts against a cap of 10
+	if _, err := pipeline(t, "iv in [1,3,5,7,9] && atk in [1,3,5,7,9]", 10); err == nil ||
+		err.Error() != "1:1: expression expands to more than 10 conjunctions; simplify it" {
+		t.Errorf("small cap: err = %v", err)
 	}
 }

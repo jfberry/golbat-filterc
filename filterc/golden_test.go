@@ -2,6 +2,8 @@ package filterc
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -72,11 +74,59 @@ func TestCompileErrorsAndLimits(t *testing.T) {
 	if _, err := Compile(`x == 1`); err == nil || err.Error() != `1:1: unknown field "x"` {
 		t.Errorf("err = %v", err)
 	}
-	if _, err := Compile(`iv != 1 && level != 1`, WithMaxConjunctions(2)); err == nil {
-		t.Error("expected the conjunction limit to trip")
+	if _, err := Compile(`iv != 1 && level != 1`, WithMaxConjunctions(2)); err == nil ||
+		err.Error() != "1:1: expression expands to more than 2 conjunctions; simplify it" {
+		t.Errorf("conjunction limit: err = %v", err)
 	}
-	if _, err := Compile(`pokemon in [1, 2, 3]`, WithMaxClauses(0)); err == nil {
-		t.Error("expected the clause limit to trip")
+}
+
+// Each cap passes at count == cap and fails at cap+1, with its own message.
+func TestCompileCapBoundaries(t *testing.T) {
+	// one generic clause plus three block clauses
+	const fourClauses = `pokemon != 1 && pokemon != 2 && pokemon != 3`
+	if _, err := Compile(fourClauses, WithMaxClauses(4)); err != nil {
+		t.Errorf("clauses == cap: %v", err)
+	}
+	if _, err := Compile(fourClauses, WithMaxClauses(3)); err == nil ||
+		err.Error() != "1:1: expression compiles to more than 3 clauses; simplify it" {
+		t.Errorf("clauses > cap: err = %v", err)
+	}
+	// three keys in one clause
+	const threeKeys = `pokemon in [1, 2, 3] && iv == 100`
+	if _, err := Compile(threeKeys, WithMaxKeys(3)); err != nil {
+		t.Errorf("keys == cap: %v", err)
+	}
+	if _, err := Compile(threeKeys, WithMaxKeys(2)); err == nil ||
+		err.Error() != "1:1: expression names more than 2 species/form keys; simplify it" {
+		t.Errorf("keys > cap: err = %v", err)
+	}
+}
+
+// pokemon × form lists name N×M keys in one clause; the key cap must refuse
+// them while the key set is being built, not after the buckets are.
+func TestKeyCapRefusesBeforeBuilding(t *testing.T) {
+	list := func(lo, n int) string {
+		strs := make([]string, n)
+		for i := range strs {
+			strs[i] = fmt.Sprint(lo + i)
+		}
+		return "[" + strings.Join(strs, ",") + "]"
+	}
+	src := "pokemon in " + list(1, 2000) + " && form in " + list(0, 2000)
+	n, err := parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conjs, err := toDNF(nnf(n), DefaultMaxConjunctions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes := allocDuring(func() { _, err = dispatch(conjs, DefaultMaxClauses, DefaultMaxKeys) })
+	if err == nil || err.Error() != fmt.Sprintf("1:1: expression names more than %d species/form keys; simplify it", DefaultMaxKeys) {
+		t.Errorf("err = %v", err)
+	}
+	if bytes > 8<<20 {
+		t.Errorf("dispatch allocated %d MiB before refusing", bytes>>20)
 	}
 }
 
