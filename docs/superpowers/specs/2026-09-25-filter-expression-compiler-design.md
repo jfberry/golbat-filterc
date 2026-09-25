@@ -168,61 +168,77 @@ keys. `iv != 50` becomes two generic clauses (`-1..49`, `51..100`).
    environment declaring the 13 fields as `int`. Then a whitelist walk over
    the AST that admits only the constructs above; anything else is an error
    at its position. Unary minus on an integer literal is folded here.
-2. **Lower to literals.** Each comparison becomes a canonical literal:
-   for range fields an *interval set* over the domain (a sorted list of
-   disjoint closed intervals); for `gender` a value set; for `pokemon` and
-   `form` an id set with a negated flag. `in`, `not in`, ranges and all six
-   comparison operators reduce to these. On `pokemon`/`form` a range or an
-   ordering comparison is first an interval set within the domain (values
-   below it are clipped, so `pokemon in 0..5` is 1..5), then an id set: its
-   members when they are at most half the domain, otherwise the negated
-   complement (`pokemon > 5` is ¬{1..5}). Very large sets hit the key cap.
+2. **Lower to literals.** Each comparison becomes a canonical literal: an
+   *interval set* over the field's domain (a sorted list of disjoint closed
+   intervals). `pokemon` and `form` are no different: `in`, `not in`,
+   ranges and all six comparison operators reduce to an interval set within
+   the domain (values below it are clipped, so `pokemon in 0..5` is 1..5;
+   `pokemon > 5` is 6..32767). Nothing is enumerated while lowering. Explicit
+   ids are still checked: `pokemon == 0`, `pokemon in [0]`, a negative form
+   or an id outside the domain is an error at that id.
 3. **Negation normal form.** `!` is pushed to the literals with De Morgan;
-   on a literal it is the complement within the field's domain (intervals →
-   complementary intervals; species/form → flip the flag).
+   on a literal it is the complement within the field's domain
+   (complementary intervals), for species and form as for every field.
 4. **Disjunctive normal form.** AND is distributed over OR. A conjunction is
-   built as it is formed — intersecting interval sets and value sets,
-   intersecting positive species and form sets, unioning negative ones — so
-   a conjunction that becomes unsatisfiable (an empty interval set, an empty
-   positive species or form set, a positive species or form also in the
-   corresponding negative set) is dropped immediately and the intermediate
+   built as it is formed — intersecting the interval sets field by field,
+   species and form included — so a conjunction that becomes unsatisfiable
+   (an empty interval set) is dropped immediately and the intermediate
    never holds more than the final conjunctions. The conjunction count is
    capped.
 5. **Split.** A v3 clause holds one `{min, max}` per range field, so a
    conjunction whose interval set for a field has *n* intervals becomes *n*
    conjunctions (the cartesian product across fields, under the same cap).
-   `gender` is emitted as a list and needs no split.
-6. **Validate.** A conjunction with a positive or negative form literal
-   must have a positive species set; otherwise it is an error citing the
-   form literal's position.
+   `gender` is emitted as a list, and `pokemon` and `form` become keys, so
+   none of them is split.
+6. **Validate.** A conjunction constraining `form` (to anything short of
+   the whole form domain) must constrain `pokemon` to a set whose small
+   side (see Dispatch) is positive; otherwise it is an error citing the
+   first form literal's position. `pokemon != 1 && form == 0` and
+   `!(pokemon == 1 && form == 0)` are therefore errors.
 7. **Dispatch.** See below.
 8. **Emit** the v3 JSON: keys sorted, conjunctions in source order, ranges
    with both bounds.
 
 ### Dispatch
 
-For a conjunction *c* write S⁺(c) for its positive species set (or ANY),
-S⁻(c) for its negative species set, F⁺(c) for its positive form set (or
-ANY) and F⁻(c) for its negative form set.
+For a conjunction *c* write S(c) for its species set (or ANY when `pokemon`
+is unconstrained) and F(c) for its form set (or ANY). For a set X over a
+domain D, |X| is Σ(hi − lo + 1) over its intervals — computed, never
+enumerated — and the **small side** of X is X itself when
+|X| ≤ |D| − |X|, otherwise its complement Xᶜ (a tie keeps X). A small
+side of Xᶜ is *negative*.
 
-**Distinguished keys** D are the `(species, form)` keys the expression names:
+**Distinguished keys** D are the `(species, form)` keys the expression
+names, drawn from small sides only:
 
-- for each *c* and each s ∈ S⁺(c): `(s, f)` for every f ∈ F⁺(c) if F⁺(c) is
-  not ANY; `(s, f)` for every f ∈ F⁻(c); and `(s, any)` if F⁺(c) is ANY;
-- for each *c* and each s ∈ S⁻(c): `(s, any)`.
+- S(c) = ANY: none (validate guarantees F(c) is ANY or the whole domain);
+- S(c) with a positive small side: for each s ∈ S(c), `(s, f)` for each f
+  on F(c)'s small side when F(c) is constrained, plus `(s, any)` when that
+  small side is negative (its exact keys are the excluded forms); or
+  `(s, any)` when F(c) is ANY;
+- S(c) with a negative small side Sᶜ: `(s, any)` for each s ∈ Sᶜ.
+
+**The key cap is checked before enumeration**: the per-conjunction key
+counts are summed from interval sizes, and if the sum exceeds the cap the
+compile fails without enumerating a key. Only then is the (deduplicated,
+sorted) key set materialised. So `pokemon > 20000 && pokemon < 20010`
+names nine keys, and a thousand copies of `pokemon in 1..16383` are
+refused in constant memory.
 
 **Buckets.** A key's bucket is the set of conjunctions that apply to a
 representative pokemon of that key:
 
-- exact key `(s, f)`: *c* with (S⁺(c) = ANY or s ∈ S⁺(c)), s ∉ S⁻(c),
-  (F⁺(c) = ANY or f ∈ F⁺(c)), and f ∉ F⁻(c);
+- exact key `(s, f)`: *c* with s ∈ S(c) (ANY contains everything) and
+  f ∈ F(c);
 - species key `(s, any)`, whose representative is a form of *s* with no
-  exact key: *c* with (S⁺(c) = ANY or s ∈ S⁺(c)), s ∉ S⁻(c), and
-  F⁺(c) = ANY. Every form named negatively for *s* has an exact key, so the
-  representative satisfies f ∉ F⁻(c) by construction;
+  exact key: *c* with s ∈ S(c) and (F(c) = ANY or F(c)'s small side is
+  negative). Every form outside a negative small side has an exact key, so
+  the representative is inside F(c) exactly then; with a positive small
+  side, every form in F(c) has an exact key and the representative is
+  outside it;
 - the generic bucket ("everything else", a species no key names): *c* with
-  S⁺(c) = ANY. S⁻(c) is irrelevant because every negatively named species
-  is a distinguished key.
+  S(c) = ANY or S(c)'s small side negative — every species that small side
+  names is a distinguished key, so the rest are in S(c).
 
 This is exactly Golbat's probe order — exact, then species, then generic —
 evaluated at compile time, so no bucket ever needs to inherit from another
@@ -234,8 +250,9 @@ at scan time and Golbat never has to merge anything.
 any. Then, for each distinguished key with an empty bucket, the block clause
 `{"pokemon": [key], "iv": {"min": 1, "max": 0}}`, which can never hold and
 so stops the fallback from applying anything to that key. Output size is at
-most 2 × conjunctions + |D| clauses, with |D| at most the key cap;
-identical conditions for many keys cost one clause.
+most 2 × conjunctions + |D| clauses, with |D| at most the key cap, and at
+most the id cap in pokemon entries; identical conditions for many keys cost
+one clause.
 
 Worked check for `iv == 100 || (pokemon == 1 && gender == 2)`: c₁ has
 S⁺ = ANY, c₂ has S⁺ = {1}; D = {(1, any)}; generic = {c₁}; bucket(1, any) =
@@ -244,18 +261,28 @@ clause. That is the second example above.
 
 ### Limits
 
-Defaults, overridable by option: 512 conjunctions after splitting
-(`WithMaxConjunctions`); 10,000 distinguished `(species, form)` keys
-(`WithMaxKeys`); 10,000 emitted clauses (`WithMaxClauses`); 64 KiB of
-expression text; parse depth as Expr's default. Every cap is checked before
-the allocation it guards — split refuses a field's product before building
-it, the key cap trips while D is collected (before any bucket is computed),
-and the clause cap as each clause is appended — so the output is bounded by
-2 × conjunctions + |D| with |D| ≤ the key cap. Exceeding one is an error
-naming the limit (`expression expands to more than N conjunctions`,
-`names more than N species/form keys`, `compiles to more than N clauses`). The server also caps request
-body size. An expression with no satisfiable conjunction compiles to an empty
-`filters` list and a warning that it matches nothing.
+Four caps, each overridable by option and each checked before the
+allocation it bounds:
+
+| cap | default | option | checked |
+|-----|---------|--------|---------|
+| conjunctions after splitting | 512 | `WithMaxConjunctions` | as DNF forms conjunctions; split refuses a field's product before building it |
+| distinguished `(species, form)` keys | 10,000 | `WithMaxKeys` | summed from interval sizes before any key is enumerated or bucket computed |
+| pokemon entries across all clauses, blocks included | 100,000 | `WithMaxIds` | before each entry is appended |
+| emitted clauses | 10,000 | `WithMaxClauses` | before each clause is appended |
+
+So the output is bounded by 2 × conjunctions + |D| clauses **and** by the id
+cap in pokemon entries: every generic conjunction repeats every key it
+applies to, so without the id cap a small expression (`pokemon in 1..10000`
+beside a few hundred generic conjunctions) could ask for millions of
+entries. Exceeding a cap is an error naming it (`expression expands to more
+than N conjunctions`, `names more than N species/form keys`, `emits more
+than N pokemon entries`, `compiles to more than N clauses`). The expression
+text is capped at 64 KiB and parse depth at Expr's default; error positions
+come from rune and line tables built once per parse, so positions cost
+O(log lines) each. The server also caps request body size. An expression
+with no satisfiable conjunction compiles to an empty `filters` list and a
+warning that it matches nothing.
 
 ### Errors
 
@@ -277,6 +304,7 @@ func Compile(expression string, opts ...Option) (*Compiled, error)
 func WithMaxConjunctions(n int) Option
 func WithMaxClauses(n int) Option
 func WithMaxKeys(n int) Option
+func WithMaxIds(n int) Option
 
 type Compiled struct {
     Filters  []Clause // v3 wire shape, json tags as the API expects
@@ -364,7 +392,8 @@ an error, so a misspelled `secret` is not silently ignored.
   message and position.
 - **Property test — the proof.** A generator produces random expressions
   (depth-limited; ids drawn from a small set so species overlap and negation
-  bites; all operators and fields) and random rows (every field across its
+  bites, plus species bounds at the top of the domain so two large sets can
+  meet in a small one; all operators and fields) and random rows (every field across its
   domain including the `−1` sentinels; PvP present with ranks including
   4096, or absent). For each pair, `matcher(compile(e), row)` must equal
   `reference(e, row)`. The **reference evaluator** is a hand-written
@@ -379,6 +408,10 @@ an error, so a misspelled `secret` is not silently ignored.
   domain; no `{id: 0}` and no form without an id; block clauses only for
   keys with empty buckets; clause count within the bound above.
 - **Fuzz** the parser and compiler for panics and for the invariants.
+- **Allocation ceilings** for each cap and for positions: the adversarial
+  inputs that motivated them (1,500 half-domain species ranges, a key or
+  id blow-up, a 64 KB literal list or comparison chain) are refused or
+  compiled under 16 MiB.
 - **End to end**, opt-in via the config file: compile a set of expressions,
   run each through `/scan` against a real Golbat, and check every returned
   pokemon against the reference evaluator. This is the check that the

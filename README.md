@@ -67,8 +67,11 @@ Fields: `pokemon`, `form`, `iv`, `atk`, `def`, `sta`, `level`, `cp`,
 `in [..]`, `not in`, `a..b` ranges, `&& || !` (or `and or not`), parentheses.
 Integers only. A form literal needs a `pokemon` id in the same conjunction.
 Ranges and comparisons work on `pokemon` and `form` too (`pokemon in 1..151`,
-`pokemon > 5`, `form > 0`) and compile to the equivalent id set; a very large
-set hits the key cap (10,000 species/form keys by default).
+`pokemon > 5`, `pokemon > 20000 && pokemon < 20010`, `form > 0`); each set
+is keyed from its smaller side (its members or the species it excludes), and
+a set too large either way hits the key or id cap. Compiles are bounded by
+four caps, each checked before the allocation it guards: 512 conjunctions,
+10,000 species/form keys, 100,000 pokemon entries and 10,000 clauses.
 
 Semantics follow Golbat's matcher exactly, which the property test in
 `filterc/property_test.go` checks: `-1` is a real value ("no encounter
