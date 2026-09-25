@@ -6,39 +6,15 @@ import (
 )
 
 // conjunction is one AND of literals. The zero value is unconstrained.
+// pokemon and form are slots like any other field.
 type conjunction struct {
-	has        [nFields]bool        // ranges[f] is a constraint (possibly empty = unsatisfiable)
-	ranges     [nFields]intervalSet // species slots unused
-	hasSpecies bool                 // speciesPos is a constraint
-	speciesPos idSet
-	speciesNeg idSet
-	hasForm    bool
-	formPos    idSet
-	formNeg    idSet
-	formAt     *Position // first form literal, for the species check
+	has    [nFields]bool // ranges[f] is a constraint (possibly empty = unsatisfiable)
+	ranges [nFields]intervalSet
+	formAt *Position // first form literal, for the species check
 }
 
 func (c conjunction) String() string {
 	var parts []string
-	ids := func(s idSet) string {
-		strs := make([]string, len(s))
-		for i, v := range s {
-			strs[i] = fmt.Sprint(v)
-		}
-		return "{" + strings.Join(strs, ",") + "}"
-	}
-	if c.hasSpecies {
-		parts = append(parts, "pokemon"+ids(c.speciesPos))
-	}
-	if len(c.speciesNeg) > 0 {
-		parts = append(parts, "!pokemon"+ids(c.speciesNeg))
-	}
-	if c.hasForm {
-		parts = append(parts, "form"+ids(c.formPos))
-	}
-	if len(c.formNeg) > 0 {
-		parts = append(parts, "!form"+ids(c.formNeg))
-	}
 	for f := range c.ranges {
 		if !c.has[f] {
 			continue
@@ -59,25 +35,16 @@ func tooMany(limit int) *Error {
 // fromLit makes a conjunction of one literal; ok is false when it can never
 // hold (an empty set).
 func fromLit(n node) (c conjunction, ok bool) {
-	switch v := n.(type) {
-	case *rangeLit:
-		c.has[v.f], c.ranges[v.f] = true, v.set
-		return c, len(v.set) > 0
-	case *idLit:
-		pos := v.pos
-		switch {
-		case v.f == fPokemon && v.neg:
-			c.speciesNeg = v.ids
-		case v.f == fPokemon:
-			c.hasSpecies, c.speciesPos = true, v.ids
-		case v.neg:
-			c.formNeg, c.formAt = v.ids, &pos
-		default:
-			c.hasForm, c.formPos, c.formAt = true, v.ids, &pos
-		}
-		return c, v.neg || len(v.ids) > 0 // a positive empty set can never hold
+	v, isLit := n.(*rangeLit)
+	if !isLit {
+		return c, false
 	}
-	return c, false
+	c.has[v.f], c.ranges[v.f] = true, v.set
+	if v.f == fForm {
+		pos := v.pos
+		c.formAt = &pos
+	}
+	return c, len(v.set) > 0
 }
 
 // merge ANDs two conjunctions; ok is false when the result is unsatisfiable.
@@ -93,34 +60,6 @@ func merge(a, b conjunction) (conjunction, bool) {
 		}
 		c.ranges[f] = c.ranges[f].intersect(b.ranges[f])
 		if len(c.ranges[f]) == 0 {
-			return c, false
-		}
-	}
-	if b.hasSpecies {
-		if c.hasSpecies {
-			c.speciesPos = c.speciesPos.intersect(b.speciesPos)
-		} else {
-			c.hasSpecies, c.speciesPos = true, b.speciesPos
-		}
-	}
-	c.speciesNeg = c.speciesNeg.union(b.speciesNeg)
-	if c.hasSpecies {
-		c.speciesPos = c.speciesPos.minus(c.speciesNeg)
-		if len(c.speciesPos) == 0 {
-			return c, false
-		}
-	}
-	if b.hasForm {
-		if c.hasForm {
-			c.formPos = c.formPos.intersect(b.formPos)
-		} else {
-			c.hasForm, c.formPos = true, b.formPos
-		}
-	}
-	c.formNeg = c.formNeg.union(b.formNeg)
-	if c.hasForm {
-		c.formPos = c.formPos.minus(c.formNeg)
-		if len(c.formPos) == 0 {
 			return c, false
 		}
 	}
@@ -178,13 +117,14 @@ func toDNF(n node, maxConj int) ([]conjunction, error) {
 
 // split turns a conjunction whose interval set for a field has several
 // intervals into one conjunction per interval (a clause holds one range per
-// field). gender is emitted as a list, so it is not split.
+// field). gender is emitted as a list, and pokemon and form become keys,
+// so none of them is split.
 func split(conjs []conjunction, maxConj int) ([]conjunction, error) {
 	var out []conjunction
 	for _, c := range conjs {
 		parts := []conjunction{c}
 		for f := range c.ranges {
-			if !c.has[f] || len(c.ranges[f]) <= 1 || field(f) == fGender {
+			if !c.has[f] || len(c.ranges[f]) <= 1 || field(f) == fGender || field(f).isSpecies() {
 				continue
 			}
 			// refuse the product before building it
@@ -209,11 +149,16 @@ func split(conjs []conjunction, maxConj int) ([]conjunction, error) {
 	return out, nil
 }
 
-// validate rejects a form constraint without a positive species: forms
-// belong to a species, and the v3 model has no "any species, this form" key.
+// validate rejects a form constraint without a species constraint whose
+// small side is positive: forms belong to a species, and the v3 model has
+// no "any species, this form" key. A form set covering the whole domain
+// constrains nothing.
 func validate(conjs []conjunction) error {
 	for _, c := range conjs {
-		if (c.hasForm || len(c.formNeg) > 0) && !c.hasSpecies {
+		if !c.has[fForm] || c.ranges[fForm].equal(intervalSet{domains[fForm]}) {
+			continue
+		}
+		if !c.has[fPokemon] || smallSideNegative(fPokemon, c.ranges[fPokemon]) {
 			return errorf(*c.formAt, "form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))")
 		}
 	}

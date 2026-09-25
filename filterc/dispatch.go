@@ -2,7 +2,6 @@ package filterc
 
 import (
 	"cmp"
-	"maps"
 	"slices"
 )
 
@@ -19,24 +18,92 @@ func (k key) pokemonId() PokemonId {
 	return PokemonId{Id: k.species, Form: &f}
 }
 
-// applies reports whether conjunction c holds for a representative pokemon
-// of key k. For a species key the representative is a form of the species
-// with no exact key of its own; every form named negatively has an exact
-// key, so such a representative is outside every negative form set.
-func applies(c conjunction, k key) bool {
-	if c.hasSpecies && !c.speciesPos.contains(k.species) {
+// keyPlan is how one conjunction takes part in dispatch. For a species set
+// S (or form set F) the small side is S itself when |S| <= |D| - |S|, else
+// its complement; keys are drawn from the small side only.
+type keyPlan struct {
+	c          conjunction
+	generic    bool        // applies to the "everything else" group
+	species    intervalSet // small side of S; unused when S is unconstrained
+	speciesNeg bool        // the small side is the complement of S
+	form       intervalSet // small side of F; unused when F is unconstrained
+	formNeg    bool        // the small side is the complement of F
+}
+
+func planFor(c conjunction) keyPlan {
+	p := keyPlan{c: c, generic: true}
+	if c.has[fPokemon] {
+		p.species, p.speciesNeg = smallSide(fPokemon, c.ranges[fPokemon])
+		p.generic = p.speciesNeg
+	}
+	// a form set covering the whole domain passes validate without a species;
+	// its small side is the empty complement, so it constrains nothing
+	if c.has[fForm] {
+		p.form, p.formNeg = smallSide(fForm, c.ranges[fForm])
+	}
+	return p
+}
+
+// keyCount is the number of keys the plan names, from interval sizes.
+// validate guarantees F is unconstrained (or the whole domain) unless the
+// species small side is positive.
+func (p keyPlan) keyCount() int {
+	switch {
+	case !p.c.has[fPokemon]:
+		return 0
+	case p.speciesNeg || !p.c.has[fForm]:
+		return p.species.size()
+	case p.formNeg:
+		return p.species.size() * (p.form.size() + 1)
+	}
+	return p.species.size() * p.form.size()
+}
+
+// appendKeys enumerates the plan's keys: (s, any) for each species on the
+// small side of a negative or form-free S; otherwise (s, f) for each form on
+// F's small side, plus (s, any) when that side is negative (those exact
+// keys are the forms excluded).
+func (p keyPlan) appendKeys(keys []key) []key {
+	if !p.c.has[fPokemon] {
+		return keys
+	}
+	byForm := !p.speciesNeg && p.c.has[fForm]
+	var forms []int
+	if byForm {
+		forms = p.form.values()
+	}
+	for _, s := range p.species.values() {
+		if !byForm {
+			keys = append(keys, key{s, anyForm})
+			continue
+		}
+		for _, f := range forms {
+			keys = append(keys, key{s, f})
+		}
+		if p.formNeg {
+			keys = append(keys, key{s, anyForm})
+		}
+	}
+	return keys
+}
+
+// applies reports whether the plan's conjunction holds for a representative
+// pokemon of key k. For a species key the representative is a form of the
+// species with no exact key of its own; every form outside a negative small
+// side has an exact key, so such a representative is inside F exactly when
+// F's small side is negative.
+func (p keyPlan) applies(k key) bool {
+	c := p.c
+	if c.has[fPokemon] && !c.ranges[fPokemon].contains(k.species) {
 		return false
 	}
-	if c.speciesNeg.contains(k.species) {
-		return false
+	if !c.has[fForm] {
+		return true
 	}
 	if k.form == anyForm {
-		return !c.hasForm
+		return p.formNeg
 	}
-	if c.hasForm && !c.formPos.contains(k.form) {
-		return false
-	}
-	return !c.formNeg.contains(k.form)
+	return c.ranges[fForm].contains(k.form)
 }
 
 func blockClause(k key) Clause {
@@ -67,45 +134,25 @@ func tooManyClauses(limit int) *Error {
 	return errorf(Position{Line: 1, Column: 1}, "expression compiles to more than %d clauses; simplify it", limit)
 }
 
-// distinguishedKeys collects the (species, form) keys the conjunctions name,
-// refusing as soon as there are more than maxKeys.
-func distinguishedKeys(conjs []conjunction, maxKeys int) ([]key, error) {
-	distinguished := map[key]struct{}{}
-	add := func(k key) error {
-		distinguished[k] = struct{}{}
-		if len(distinguished) > maxKeys {
-			return tooManyKeys(maxKeys)
-		}
-		return nil
-	}
-	for _, c := range conjs {
-		if c.hasSpecies {
-			for _, s := range c.speciesPos {
-				if c.hasForm {
-					for _, f := range c.formPos {
-						if err := add(key{s, f}); err != nil {
-							return nil, err
-						}
-					}
-				} else if err := add(key{s, anyForm}); err != nil {
-					return nil, err
-				}
-				for _, f := range c.formNeg {
-					if err := add(key{s, f}); err != nil {
-						return nil, err
-					}
-				}
-			}
-		}
-		for _, s := range c.speciesNeg {
-			if err := add(key{s, anyForm}); err != nil {
-				return nil, err
-			}
+// distinguishedKeys collects the (species, form) keys the conjunctions
+// name. The count is summed from interval sizes and checked against maxKeys
+// before any key is enumerated.
+func distinguishedKeys(plans []keyPlan, maxKeys int) ([]key, error) {
+	total := 0
+	for _, p := range plans {
+		total += p.keyCount()
+		if total > maxKeys {
+			return nil, tooManyKeys(maxKeys)
 		}
 	}
-	return slices.SortedFunc(maps.Keys(distinguished), func(a, b key) int {
+	keys := make([]key, 0, total)
+	for _, p := range plans {
+		keys = p.appendKeys(keys)
+	}
+	slices.SortFunc(keys, func(a, b key) int {
 		return cmp.Or(cmp.Compare(a.species, b.species), cmp.Compare(a.form, b.form))
-	}), nil
+	})
+	return slices.Compact(keys), nil
 }
 
 // dispatch computes, per (species, form) key the expression names, the
@@ -113,7 +160,11 @@ func distinguishedKeys(conjs []conjunction, maxKeys int) ([]key, error) {
 // else) would select for it, and emits clauses so that no group needs to
 // inherit from another at scan time.
 func dispatch(conjs []conjunction, maxClauses, maxKeys int) ([]Clause, error) {
-	keys, err := distinguishedKeys(conjs, maxKeys)
+	plans := make([]keyPlan, len(conjs))
+	for i, c := range conjs {
+		plans[i] = planFor(c)
+	}
+	keys, err := distinguishedKeys(plans, maxKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -127,21 +178,21 @@ func dispatch(conjs []conjunction, maxClauses, maxKeys int) ([]Clause, error) {
 		return nil
 	}
 	used := make(map[key]bool, len(keys))
-	for _, c := range conjs {
-		if !c.hasSpecies {
-			if err := emit(clauseFor(c, nil)); err != nil {
+	for _, p := range plans {
+		if p.generic {
+			if err := emit(clauseFor(p.c, nil)); err != nil {
 				return nil, err
 			}
 		}
 		var ids []PokemonId
 		for _, k := range keys {
-			if applies(c, k) {
+			if p.applies(k) {
 				ids = append(ids, k.pokemonId())
 				used[k] = true
 			}
 		}
 		if len(ids) > 0 {
-			if err := emit(clauseFor(c, ids)); err != nil {
+			if err := emit(clauseFor(p.c, ids)); err != nil {
 				return nil, err
 			}
 		}

@@ -41,14 +41,23 @@ func TestDNF(t *testing.T) {
 		{"!(iv >= 90 && level <= 30)", "iv[-1,89]\nlevel[31,127]"},
 		{"iv != 50", "iv[-1,49]\niv[51,100]"},
 		{"gender != 2", "gender[-1,1][3,3]"},
-		{"(pokemon == 1 || pokemon == 4) && iv == 100", "pokemon{1} iv[100,100]\npokemon{4} iv[100,100]"},
-		{"pokemon in [1, 4] && pokemon != 4", "pokemon{1} !pokemon{4}"},
+		{"(pokemon == 1 || pokemon == 4) && iv == 100", "pokemon[1,1] iv[100,100]\npokemon[4,4] iv[100,100]"},
+		{"pokemon in [1, 4] && pokemon != 4", "pokemon[1,1]"},
 		{"pokemon == 1 && pokemon != 1", ""},
 		{"pokemon == 1 && form == 0 && form != 0", ""},
-		{"pokemon == 1 && form != 0 && iv >= 90", "pokemon{1} !form{0} iv[90,100]"},
-		{"size == 5 && pokemon != 710", "!pokemon{710} size[5,5]"},
-		{"iv == 100 || (pokemon == 1 && gender == 2)", "iv[100,100]\npokemon{1} gender[2,2]"},
-		{"pokemon not in [1, 4] || great == 4096", "!pokemon{1,4}\ngreat[4096,4096]"},
+		{"pokemon == 1 && form != 0 && iv >= 90", "pokemon[1,1] form[1,32767] iv[90,100]"},
+		{"size == 5 && pokemon != 710", "pokemon[1,709][711,32767] size[5,5]"},
+		{"iv == 100 || (pokemon == 1 && gender == 2)", "iv[100,100]\npokemon[1,1] gender[2,2]"},
+		{"pokemon not in [1, 4] || great == 4096", "pokemon[2,3][5,32767]\ngreat[4096,4096]"},
+		// species sets intersect like any field: two large sides meet in nine ids
+		{"pokemon > 20000 && pokemon < 20010", "pokemon[20001,20009]"},
+		{"pokemon != 1 && pokemon != 4", "pokemon[2,3][5,32767]"},
+		// species and form are never split
+		{"pokemon in [1, 3] && form in [0, 2] && iv != 50", "pokemon[1,1][3,3] form[0,0][2,2] iv[-1,49]\npokemon[1,1][3,3] form[0,0][2,2] iv[51,100]"},
+		// a small positive side may come from the intersection of two negatives
+		{"pokemon > 20000 && pokemon < 20010 && form == 0", "pokemon[20001,20009] form[0,0]"},
+		// a form set covering the whole domain constrains nothing
+		{"pokemon != 1 && form >= 0", "pokemon[2,32767] form[0,32767]"},
 	}
 	for _, c := range cases {
 		got, err := pipeline(t, c.src, 512)
@@ -71,6 +80,10 @@ func TestDNFErrors(t *testing.T) {
 		{"form == 0", 512, "1:1: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
 		{"pokemon != 1 && form == 0", 512, "1:17: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
 		{"!(pokemon == 1 && form == 0)", 512, "1:19: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
+		// a species set whose small side is its complement names no species
+		{"pokemon > 5 && form == 0", 512, "1:16: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
+		// the position is the first form literal, even one covering the domain
+		{"form >= 0 && form == 1", 512, "1:1: form needs a pokemon id in the same conjunction (after a negation, write the species explicitly: pokemon != X || (pokemon == X && form != F))"},
 		{"(iv == 1 || iv == 2) && (level == 1 || level == 2) && (cp == 1 || cp == 2)", 4, "1:1: expression expands to more than 4 conjunctions; simplify it"},
 		{"iv != 1 && level != 1 && cp != 1", 4, "1:1: expression expands to more than 4 conjunctions; simplify it"},
 		{"(iv != 1 && level != 1) || cp == 5", 4, "1:1: expression expands to more than 4 conjunctions; simplify it"},

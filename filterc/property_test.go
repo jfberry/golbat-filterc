@@ -12,7 +12,8 @@ import (
 // Values per field chosen around the domain edges and the sentinels, so
 // complements and boundaries are exercised. Species ids are few so that
 // clauses overlap and negation bites; rows also use species 5, which no
-// expression names.
+// expression names by id, and the top of the species domain, which large
+// species bounds reach.
 var genRangeFields = []struct {
 	f    field
 	vals []int
@@ -64,12 +65,27 @@ func genAtom(rng *rand.Rand) string {
 			return fmt.Sprintf("pokemon in [%d, %d]", s, 1+rng.Intn(4))
 		}
 		return fmt.Sprintf("pokemon not in [%d, %d]", s, 1+rng.Intn(4))
-	case 8, 9: // species ranges and comparisons (small, so keys stay few)
-		switch rng.Intn(3) {
+	case 8, 9: // species ranges and comparisons (small sides stay small, so keys stay few)
+		switch rng.Intn(6) {
 		case 0:
 			return fmt.Sprintf("pokemon in %d..%d", rng.Intn(6), rng.Intn(6))
 		case 1:
 			return fmt.Sprintf("pokemon > %d", rng.Intn(6))
+		case 2:
+			return fmt.Sprintf("pokemon not in %d..%d", rng.Intn(6), rng.Intn(6))
+		case 3:
+			return fmt.Sprintf("pokemon %s %d", pick(rng, []string{"<=", ">="}), rng.Intn(6))
+		case 4: // bounds at the top of the domain: two large sides can meet in a small set
+			hi := domains[fPokemon].hi
+			switch rng.Intn(4) {
+			case 0:
+				return fmt.Sprintf("pokemon > %d", hi-rng.Intn(8))
+			case 1:
+				return fmt.Sprintf("pokemon < %d", hi-rng.Intn(8))
+			case 2:
+				return fmt.Sprintf("pokemon in %d..%d", rng.Intn(6), hi)
+			}
+			return fmt.Sprintf("pokemon not in %d..%d", hi-rng.Intn(8), hi)
 		}
 		return fmt.Sprintf("pokemon < %d", 1+rng.Intn(6))
 	}
@@ -96,6 +112,9 @@ func genExpr(rng *rand.Rand, depth int) string {
 
 func genRow(rng *rand.Rand) row {
 	r := row{pokemonId: 1 + rng.Intn(5), form: rng.Intn(4)}
+	if rng.Intn(8) == 0 { // the top of the species domain, named by large bounds
+		r.pokemonId = domains[fPokemon].hi - rng.Intn(8)
+	}
 	r.iv, r.atk, r.def, r.sta = pick(rng, genRangeFields[0].vals), pick(rng, genRangeFields[1].vals), pick(rng, genRangeFields[2].vals), pick(rng, genRangeFields[3].vals)
 	r.level, r.cp, r.gender, r.size = pick(rng, genRangeFields[4].vals), pick(rng, genRangeFields[5].vals), pick(rng, genRangeFields[6].vals), pick(rng, genRangeFields[7].vals)
 	if rng.Intn(10) >= 3 {

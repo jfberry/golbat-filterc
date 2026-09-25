@@ -60,6 +60,15 @@ func TestCompileGolden(t *testing.T) {
 			`[{"pokemon":[{"id":1},{"id":2},{"id":3}],"iv":{"min":100,"max":100}}]`},
 		{`pokemon > 5 && iv == 100`,
 			`[{"iv":{"min":100,"max":100}},{"pokemon":[{"id":1}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":2}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":3}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":4}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":5}],"iv":{"min":1,"max":0}}]`},
+		// two large sides intersect to a small positive set: keys, no generic clause
+		{`pokemon > 20000 && pokemon < 20010 && iv == 100`,
+			`[{"pokemon":[{"id":20001},{"id":20002},{"id":20003},{"id":20004},{"id":20005},{"id":20006},{"id":20007},{"id":20008},{"id":20009}],"iv":{"min":100,"max":100}}]`},
+		// the small side of pokemon != 1 && pokemon != 4 is {1, 4}: blocks
+		{`pokemon != 1 && pokemon != 4`,
+			`[{},{"pokemon":[{"id":1}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":4}],"iv":{"min":1,"max":0}}]`},
+		// a form set covering the whole domain constrains nothing, even without a species
+		{`!(pokemon == 2 && form < 0) && iv == 1`,
+			`[{"iv":{"min":1,"max":1}},{"iv":{"min":1,"max":1}},{"pokemon":[{"id":2}],"iv":{"min":1,"max":1}}]`},
 		// unsatisfiable: no clause, and no key (a key would block)
 		{`pokemon == 1 && iv > 100`, `[]`},
 		{`iv >= 90 && iv < 50`, `[]`},
@@ -143,6 +152,36 @@ func TestKeyCapRefusesBeforeBuilding(t *testing.T) {
 	}
 	if bytes > 8<<20 {
 		t.Errorf("dispatch allocated %d MiB before refusing", bytes>>20)
+	}
+}
+
+// A species set is counted from its intervals: 1,500 copies of a
+// half-domain range must hit the key cap without any id being enumerated
+// (the old lowering allocated gigabytes here).
+func TestSpeciesRangesRefuseBeforeEnumerating(t *testing.T) {
+	src := strings.Repeat("pokemon in 1..16383 && ", 1499) + "pokemon in 1..16383"
+	n, err := parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes := allocDuring(func() {
+		var conjs []conjunction
+		if conjs, err = toDNF(nnf(n), DefaultMaxConjunctions); err != nil {
+			return
+		}
+		if conjs, err = split(conjs, DefaultMaxConjunctions); err != nil {
+			return
+		}
+		if err = validate(conjs); err != nil {
+			return
+		}
+		_, err = dispatch(conjs, DefaultMaxClauses, DefaultMaxKeys)
+	})
+	if err == nil || err.Error() != fmt.Sprintf("1:1: expression names more than %d species/form keys; simplify it", DefaultMaxKeys) {
+		t.Errorf("err = %v", err)
+	}
+	if bytes > 16<<20 {
+		t.Errorf("compiling allocated %d MiB before refusing", bytes>>20)
 	}
 }
 

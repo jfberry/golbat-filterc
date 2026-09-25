@@ -56,8 +56,8 @@ func (s intervalSet) complement(dom interval) intervalSet {
 	return setOf(out...)
 }
 
-// values enumerates the members: gender lists, and species/form id sets
-// of at most half their domain.
+// values enumerates the members: gender lists, and dispatch's species and
+// form keys once their count has been checked against the key cap.
 func (s intervalSet) values() []int {
 	var out []int
 	for _, iv := range s {
@@ -70,38 +70,42 @@ func (s intervalSet) values() []int {
 
 func (s intervalSet) equal(t intervalSet) bool { return slices.Equal(s, t) }
 
-// idSet is a sorted set of species or form ids.
-type idSet []int
-
-func idsOf(vs ...int) idSet {
-	s := slices.Clone(vs)
-	slices.Sort(s)
-	return slices.Compact(s)
-}
-
-func (a idSet) contains(v int) bool {
-	_, ok := slices.BinarySearch(a, v)
-	return ok
-}
-
-func (a idSet) intersect(b idSet) idSet {
-	var out idSet
-	for _, v := range a {
-		if b.contains(v) {
-			out = append(out, v)
-		}
+// size is the number of members, computed from the intervals.
+func (s intervalSet) size() int {
+	n := 0
+	for _, iv := range s {
+		n += iv.hi - iv.lo + 1
 	}
-	return out
+	return n
 }
 
-func (a idSet) union(b idSet) idSet { return idsOf(append(slices.Clone(a), b...)...) }
-
-func (a idSet) minus(b idSet) idSet {
-	var out idSet
-	for _, v := range a {
-		if !b.contains(v) {
-			out = append(out, v)
+// contains reports whether v is a member, by binary search.
+func (s intervalSet) contains(v int) bool {
+	i, _ := slices.BinarySearchFunc(s, v, func(iv interval, v int) int {
+		switch {
+		case iv.hi < v:
+			return -1
+		case iv.lo > v:
+			return 1
 		}
+		return 0
+	})
+	return i < len(s) && s[i].lo <= v && v <= s[i].hi
+}
+
+// smallSideNegative reports whether the small side of s over f's domain is
+// its complement: s holds more than half the domain (a tie keeps s).
+func smallSideNegative(f field, s intervalSet) bool {
+	d := domains[f]
+	n := s.size()
+	return n > d.hi-d.lo+1-n
+}
+
+// smallSide returns the smaller of s and its complement over f's domain,
+// and whether it is the complement.
+func smallSide(f field, s intervalSet) (intervalSet, bool) {
+	if smallSideNegative(f, s) {
+		return s.complement(domains[f]), true
 	}
-	return out
+	return s, false
 }

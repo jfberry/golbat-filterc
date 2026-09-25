@@ -50,22 +50,40 @@ func TestValues(t *testing.T) {
 	}
 }
 
-func TestIdSet(t *testing.T) {
-	a := idsOf(4, 1, 4, 7)
-	if !slices.Equal(a, idSet{1, 4, 7}) {
-		t.Errorf("idsOf = %v", a)
+func TestSizeAndContains(t *testing.T) {
+	s := setOf(interval{-1, 0}, interval{5, 9}, interval{20, 20})
+	if s.size() != 8 {
+		t.Errorf("size = %d, want 8", s.size())
 	}
-	b := idsOf(7, 9, 1)
-	if got := a.intersect(b); !slices.Equal(got, idSet{1, 7}) {
-		t.Errorf("intersect = %v", got)
+	for v := -3; v <= 22; v++ {
+		want := v == -1 || v == 0 || (v >= 5 && v <= 9) || v == 20
+		if s.contains(v) != want {
+			t.Errorf("contains(%d) = %v", v, !want)
+		}
 	}
-	if got := a.union(b); !slices.Equal(got, idSet{1, 4, 7, 9}) {
-		t.Errorf("union = %v", got)
+	if setOf().contains(0) || setOf().size() != 0 {
+		t.Error("empty set")
 	}
-	if got := a.minus(b); !slices.Equal(got, idSet{4}) {
-		t.Errorf("minus = %v", got)
+}
+
+func TestSmallSide(t *testing.T) {
+	cases := []struct {
+		f    field
+		in   intervalSet
+		want intervalSet
+		neg  bool
+	}{
+		{fPokemon, setOf(interval{1, 5}), setOf(interval{1, 5}), false},
+		{fPokemon, setOf(interval{6, 32767}), setOf(interval{1, 5}), true},
+		{fPokemon, setOf(interval{1, 16383}), setOf(interval{1, 16383}), false},    // 16383 of 32767
+		{fPokemon, setOf(interval{1, 16384}), setOf(interval{16385, 32767}), true}, // 16384 of 32767
+		{fForm, setOf(interval{0, 16383}), setOf(interval{0, 16383}), false},       // a tie keeps the set
+		{fForm, setOf(interval{0, 32767}), setOf(), true},                          // the whole domain
 	}
-	if !a.contains(4) || a.contains(5) {
-		t.Error("contains")
+	for _, c := range cases {
+		got, neg := smallSide(c.f, c.in)
+		if !got.equal(c.want) || neg != c.neg {
+			t.Errorf("smallSide(%s, %v) = %v, %v; want %v, %v", c.f, c.in, got, neg, c.want, c.neg)
+		}
 	}
 }

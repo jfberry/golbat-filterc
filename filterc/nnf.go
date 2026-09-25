@@ -23,11 +23,6 @@ func pushNot(n node, neg bool) node {
 			return v
 		}
 		return &rangeLit{f: v.f, set: v.set.complement(domains[v.f]), pos: v.pos}
-	case *idLit:
-		if !neg {
-			return v
-		}
-		return &idLit{f: v.f, ids: v.ids, neg: !v.neg, pos: v.pos}
 	}
 	return n
 }
