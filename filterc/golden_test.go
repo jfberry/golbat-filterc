@@ -72,9 +72,13 @@ func TestCompileGolden(t *testing.T) {
 		// the small side of pokemon != 1 && pokemon != 4 is {1, 4}: blocks
 		{`pokemon != 1 && pokemon != 4`,
 			`[{},{"pokemon":[{"id":1}],"iv":{"min":1,"max":0}},{"pokemon":[{"id":4}],"iv":{"min":1,"max":0}}]`},
-		// a form set covering the whole domain constrains nothing, even without a species
+		// a form set covering the whole domain constrains nothing, even
+		// without a species; the two identical generic clauses are emitted once
 		{`!(pokemon == 2 && form < 0) && iv == 1`,
-			`[{"iv":{"min":1,"max":1}},{"iv":{"min":1,"max":1}},{"pokemon":[{"id":2}],"iv":{"min":1,"max":1}}]`},
+			`[{"iv":{"min":1,"max":1}},{"pokemon":[{"id":2}],"iv":{"min":1,"max":1}}]`},
+		// identical conjunctions emit one clause
+		{`(pokemon == 1 && iv == 1) || (pokemon == 1 && iv == 1) || cp == 5 || cp == 5`,
+			`[{"pokemon":[{"id":1}],"iv":{"min":1,"max":1}},{"cp":{"min":5,"max":5}},{"pokemon":[{"id":1}],"cp":{"min":5,"max":5}}]`},
 		// unsatisfiable: no clause, and no key (a key would block)
 		{`pokemon == 1 && iv > 100`, `[]`},
 		{`iv >= 90 && iv < 50`, `[]`},
@@ -311,9 +315,23 @@ func TestKeyCapRefusesBeforeBuilding(t *testing.T) {
 
 // A species set is counted from its intervals: 1,500 copies of a
 // half-domain range must hit the key cap without any id being enumerated
-// (the old lowering allocated gigabytes here).
+// (the old lowering allocated gigabytes here). 511 copies of a 10,000-id
+// exclusion each name the same 10,000 keys; walking the intervals keeps
+// that from materialising 511 id lists before the clause cap fires.
 func TestSpeciesRangesRefuseBeforeEnumerating(t *testing.T) {
-	src := strings.Repeat("pokemon in 1..16383 && ", 1499) + "pokemon in 1..16383"
+	cases := []struct{ src, want string }{
+		{strings.Repeat("pokemon in 1..16383 && ", 1499) + "pokemon in 1..16383",
+			fmt.Sprintf("1:1: expression names more than %d species/form keys; simplify it", DefaultMaxKeys)},
+		{strings.Repeat("pokemon not in 1..10000 || ", 510) + "pokemon not in 1..10000",
+			fmt.Sprintf("1:1: expression compiles to more than %d clauses; simplify it", DefaultMaxClauses)},
+	}
+	for _, c := range cases {
+		speciesRangesRefuse(t, c.src, c.want)
+	}
+}
+
+func speciesRangesRefuse(t *testing.T, src, want string) {
+	t.Helper()
 	n, err := parse(src)
 	if err != nil {
 		t.Fatal(err)
@@ -331,11 +349,27 @@ func TestSpeciesRangesRefuseBeforeEnumerating(t *testing.T) {
 		}
 		_, err = dispatch(conjs, DefaultMaxClauses, DefaultMaxKeys)
 	})
-	if err == nil || err.Error() != fmt.Sprintf("1:1: expression names more than %d species/form keys; simplify it", DefaultMaxKeys) {
-		t.Errorf("err = %v", err)
+	if err == nil || err.Error() != want {
+		t.Errorf("%.40q…: err = %v, want %s", src, err, want)
 	}
 	if bytes > 16<<20 {
-		t.Errorf("compiling allocated %d MiB before refusing", bytes>>20)
+		t.Errorf("%.40q…: compiling allocated %d MiB before refusing", src, bytes>>20)
+	}
+}
+
+// Duplicate clauses are not emitted, so they count towards neither the
+// clause cap nor the id cap.
+func TestCapsCountEmittedClauses(t *testing.T) {
+	const dup = `(pokemon in [1, 2] && iv == 1) || (pokemon in [1, 2] && iv == 1) || cp == 1 || cp == 1`
+	// {iv, [1,2]}, {cp}, {cp, [1,2]}: 3 clauses, 4 entries
+	if _, err := Compile(dup, WithMaxClauses(3), WithMaxIds(4)); err != nil {
+		t.Errorf("duplicates counted: %v", err)
+	}
+	if _, err := Compile(dup, WithMaxClauses(2)); err == nil {
+		t.Error("clauses > cap: expected an error")
+	}
+	if _, err := Compile(dup, WithMaxIds(3)); err == nil {
+		t.Error("ids > cap: expected an error")
 	}
 }
 

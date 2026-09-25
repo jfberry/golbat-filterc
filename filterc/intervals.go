@@ -56,10 +56,9 @@ func (s intervalSet) complement(dom interval) intervalSet {
 	return setOf(out...)
 }
 
-// values enumerates the members: gender lists, and dispatch's species and
-// form keys once their count has been checked against the key cap.
+// values enumerates the members, for gender lists (a small domain).
 func (s intervalSet) values() []int {
-	var out []int
+	out := make([]int, 0, s.size())
 	for _, iv := range s {
 		for v := iv.lo; v <= iv.hi; v++ {
 			out = append(out, v)

@@ -2,6 +2,8 @@ package filterc
 
 import (
 	"cmp"
+	"encoding/json"
+	"iter"
 	"slices"
 )
 
@@ -74,32 +76,38 @@ func (p keyPlan) ownEntries() int {
 	return p.species.size() * p.form.size()
 }
 
-// appendKeys enumerates the plan's keys: (s, any) for each species on the
-// small side of a negative or form-free S; otherwise (s, f) for each form on
-// F's small side, plus (s, any) when that side is negative (those exact
-// keys are the forms excluded).
-func (p keyPlan) appendKeys(keys []key) []key {
-	if !p.c.has[fPokemon] {
-		return keys
-	}
-	byForm := !p.speciesNeg && p.c.has[fForm]
-	var forms []int
-	if byForm {
-		forms = p.form.values()
-	}
-	for _, s := range p.species.values() {
-		if !byForm {
-			keys = append(keys, key{s, anyForm})
-			continue
+// keys yields the plan's keys by walking the intervals, without
+// materialising them: (s, any) for each species on the small side of a
+// negative or form-free S; otherwise (s, f) for each form on F's small
+// side, plus (s, any) when that side is negative (those exact keys are the
+// forms excluded).
+func (p keyPlan) keys() iter.Seq[key] {
+	return func(yield func(key) bool) {
+		if !p.c.has[fPokemon] {
+			return
 		}
-		for _, f := range forms {
-			keys = append(keys, key{s, f})
-		}
-		if p.formNeg {
-			keys = append(keys, key{s, anyForm})
+		byForm := !p.speciesNeg && p.c.has[fForm]
+		for _, si := range p.species {
+			for s := si.lo; s <= si.hi; s++ {
+				if !byForm {
+					if !yield(key{s, anyForm}) {
+						return
+					}
+					continue
+				}
+				for _, fi := range p.form {
+					for f := fi.lo; f <= fi.hi; f++ {
+						if !yield(key{s, f}) {
+							return
+						}
+					}
+				}
+				if p.formNeg && !yield(key{s, anyForm}) {
+					return
+				}
+			}
 		}
 	}
-	return keys
 }
 
 // applies reports whether the plan's conjunction holds for a representative
@@ -175,17 +183,16 @@ func distinguishedKeys(plans []keyPlan, maxKeys, maxIds int) ([]key, error) {
 		}
 	}
 	seen := map[key]struct{}{}
-	var keys, buf []key
+	var keys []key
 	for _, p := range plans {
-		buf = p.appendKeys(buf[:0])
-		for _, k := range buf {
+		for k := range p.keys() {
 			if _, dup := seen[k]; dup {
 				continue
 			}
-			seen[k] = struct{}{}
-			if len(seen) > maxKeys {
+			if len(seen) == maxKeys {
 				return nil, tooManyKeys(maxKeys)
 			}
+			seen[k] = struct{}{}
 			keys = append(keys, k)
 		}
 	}
@@ -220,20 +227,30 @@ func dispatchCapped(conjs []conjunction, maxClauses, maxKeys, maxIds int) ([]Cla
 		return nil, err
 	}
 
+	// emit appends a clause unless an identical one (same keys, ranges and
+	// gender list) was emitted already; both caps count emitted clauses
+	// and entries only. A clause's list is at most len(keys) entries, so
+	// the work before the id cap fires stays bounded.
 	clauses := []Clause{}
+	seen := map[string]bool{}
+	ids := 0
 	emit := func(cl Clause) error {
+		b, err := json.Marshal(cl)
+		if err != nil {
+			return err
+		}
+		if seen[string(b)] {
+			return nil
+		}
 		if len(clauses) >= maxClauses {
 			return tooManyClauses(maxClauses)
 		}
-		clauses = append(clauses, cl)
-		return nil
-	}
-	ids := 0
-	addId := func() error {
-		if ids >= maxIds {
+		if ids+len(cl.Pokemon) > maxIds {
 			return tooManyIds(maxIds)
 		}
-		ids++
+		seen[string(b)] = true
+		ids += len(cl.Pokemon)
+		clauses = append(clauses, cl)
 		return nil
 	}
 	used := make(map[key]bool, len(keys))
@@ -246,9 +263,6 @@ func dispatchCapped(conjs []conjunction, maxClauses, maxKeys, maxIds int) ([]Cla
 		var list []PokemonId
 		for _, k := range keys {
 			if p.applies(k) {
-				if err := addId(); err != nil {
-					return nil, err
-				}
 				list = append(list, k.pokemonId())
 				used[k] = true
 			}
@@ -261,9 +275,6 @@ func dispatchCapped(conjs []conjunction, maxClauses, maxKeys, maxIds int) ([]Cla
 	}
 	for _, k := range keys {
 		if !used[k] {
-			if err := addId(); err != nil {
-				return nil, err
-			}
 			if err := emit(blockClause(k)); err != nil {
 				return nil, err
 			}
