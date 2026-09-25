@@ -81,5 +81,19 @@ on them is unknown, never true), ranks run 1..4096 and `4096` means
 "unranked in that league". `iv` tops out at 100 and `atk`/`def`/`sta` at 15;
 legacy rows Golbat holds with larger values are never returned.
 
+The same holds inside a compound: `!(great <= 100 && iv == 100)` excludes a
+perfect pokemon that has no PvP data. `iv != 100 || great > 100` has the same
+limitation for its PvP half: "no PvP data" is not expressible in the v3
+model.
+
+Warnings (on stderr from the CLI, with a caret; in `"warnings"` from the
+server) point at literals that compile but probably not as meant:
+
+- a negated PvP condition (`!(great <= 100)`, `great != 4096`, `great not in 1..10`) never matches a pokemon without PvP data;
+- a value outside the field's range makes a condition always or never hold (`iv < 200`, `iv > 100`), or clips a range (`iv in 50..200`);
+- a list member outside the field's range is ignored (`gender in [1, 7]`);
+- a species range below 1 ignores the ids under 1 (`pokemon in 0..3`);
+- an expression that can never hold matches nothing.
+
 Design: [docs/superpowers/specs/2026-09-25-filter-expression-compiler-design.md](docs/superpowers/specs/2026-09-25-filter-expression-compiler-design.md).
 Background: [UnownHash/Golbat#417](https://github.com/UnownHash/Golbat/issues/417).
