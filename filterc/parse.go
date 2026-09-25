@@ -26,6 +26,9 @@ func lower(src string, w *warnings) (node, error) {
 	if len(src) > maxExpressionBytes {
 		return nil, errorf(Position{Line: 1, Column: 1}, "expression longer than %d bytes", maxExpressionBytes)
 	}
+	if strings.TrimSpace(src) == "" {
+		return nil, errorf(Position{Line: 1, Column: 1}, "empty expression")
+	}
 	t := newPosTable(src)
 	tree, err := parser.Parse(src)
 	if err != nil {
@@ -34,7 +37,7 @@ func lower(src string, w *warnings) (node, error) {
 		}
 		return nil, &Error{Msg: err.Error(), Pos: Position{Line: 1, Column: 1}}
 	}
-	l := lowerer{t: t, w: w}
+	l := lowerer{t: t, w: w, src: src}
 	return l.boolean(tree.Node)
 }
 
@@ -69,8 +72,9 @@ func (t posTable) at(from int) Position {
 }
 
 type lowerer struct {
-	t posTable
-	w *warnings
+	t   posTable
+	w   *warnings
+	src string
 }
 
 func (l *lowerer) pos(n ast.Node) Position { return l.t.at(n.Location().From) }
@@ -205,6 +209,9 @@ func flip(op string) string {
 // membership lowers `field in [a, b]` and `field in a..b`, and their
 // `not in` forms when neg is set.
 func (l *lowerer) membership(v *ast.BinaryNode, neg bool) (node, error) {
+	if u, ok := v.Left.(*ast.UnaryNode); ok && (u.Operator == "not" || u.Operator == "!") {
+		return nil, errorf(l.pos(u), "%s binds tighter than in; write %s (%s in %s)", u.Operator, u.Operator, u.Node.String(), v.Right.String())
+	}
 	f, err := l.fieldOf(v.Left)
 	if err != nil {
 		return nil, err
@@ -312,9 +319,14 @@ func (l *lowerer) intLit(n ast.Node) (int, error) {
 	switch v := n.(type) {
 	case *ast.IntegerNode:
 		val, ok = v.Value, true
+	case *ast.FloatNode:
+		return 0, l.floatError(n, v, "")
 	case *ast.UnaryNode:
 		if inner, isInt := v.Node.(*ast.IntegerNode); isInt && v.Operator == "-" {
 			val, ok = -inner.Value, true
+		}
+		if inner, isFloat := v.Node.(*ast.FloatNode); isFloat && v.Operator == "-" {
+			return 0, l.floatError(n, inner, "-")
 		}
 	}
 	if !ok {
@@ -324,6 +336,19 @@ func (l *lowerer) intLit(n ast.Node) (int, error) {
 		return 0, errorf(l.pos(n), "integer %d is out of range", val)
 	}
 	return val, nil
+}
+
+// floatError names a float literal as written and, when Expr renders it
+// differently (1e2, 100.0), the value it stands for.
+func (l *lowerer) floatError(at ast.Node, f *ast.FloatNode, sign string) error {
+	rendered := sign + f.String()
+	loc := f.Location()
+	if loc.From >= 0 && loc.From < loc.To && loc.To < len(l.t.runeToByte) {
+		if text := sign + l.src[l.t.runeToByte[loc.From]:l.t.runeToByte[loc.To]]; text != rendered {
+			return errorf(l.pos(at), "expected an integer, got a float (%s is %s)", text, rendered)
+		}
+	}
+	return errorf(l.pos(at), "expected an integer, got a float (%s)", rendered)
 }
 
 // checkIds rejects explicit species or form ids outside the field's domain

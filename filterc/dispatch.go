@@ -136,14 +136,15 @@ func blockClause(k key) Clause {
 func clauseFor(c conjunction, ids []PokemonId) Clause {
 	cl := Clause{Pokemon: ids}
 	for f := range c.ranges {
-		if !c.has[f] {
+		// pokemon and form are the clause's keys, not conditions
+		if !c.has[f] || field(f).isSpecies() {
 			continue
 		}
 		if field(f) == fGender {
 			cl.Gender = c.ranges[f].values()
 			continue
 		}
-		iv := c.ranges[f][0] // exactly one interval after split
+		iv := c.ranges[f][0] // a range field has exactly one interval after split
 		cl.setRange(field(f), &MinMax{Min: iv.lo, Max: iv.hi})
 	}
 	return cl

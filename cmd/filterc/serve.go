@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/jfberry/golbat-filterc/filterc"
@@ -145,8 +146,13 @@ func runServe(s settings, stdout, stderr io.Writer) int {
 	if s.Golbat.URL != "" {
 		client = &golbat.Client{URL: s.Golbat.URL, Secret: s.Golbat.Secret, HTTP: &http.Client{Timeout: 60 * time.Second}}
 	}
-	srv := &http.Server{Addr: s.Listen, Handler: newHandler(s, client), ReadHeaderTimeout: 5 * time.Second}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	srv := &http.Server{
+		Addr:              s.Listen,
+		Handler:           newHandler(s, client),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -158,7 +164,9 @@ func runServe(s settings, stdout, stderr io.Writer) int {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(stderr, "error: shutdown: %v\n", err)
+		}
 		return 0
 	}
 }
