@@ -15,7 +15,16 @@ func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	return code, out.String(), errb.String()
 }
 
+// isolateConfig points the default config lookup at empty directories, so a
+// developer's ./filterc.toml or ~/.config/filterc/filterc.toml can't leak in.
+func isolateConfig(t *testing.T) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+}
+
 func TestCompileCommand(t *testing.T) {
+	isolateConfig(t)
 	code, out, errb := runCLI(t, "compile", "--json", "--min-lat", "1", "--min-lon", "2", "--max-lat", "3", "--max-lon", "4", "--limit", "10", "size == 5 && pokemon != 710")
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errb)
@@ -27,6 +36,7 @@ func TestCompileCommand(t *testing.T) {
 }
 
 func TestCompileCommandErrorShowsCaret(t *testing.T) {
+	isolateConfig(t)
 	code, out, errb := runCLI(t, "compile", "iv >= 90 && x == 1")
 	if code != 1 || out != "" {
 		t.Errorf("exit %d stdout %q", code, out)
@@ -38,6 +48,7 @@ func TestCompileCommandErrorShowsCaret(t *testing.T) {
 }
 
 func TestCompileWarningsGoToStderr(t *testing.T) {
+	isolateConfig(t)
 	code, _, errb := runCLI(t, "compile", "iv > 100")
 	if code != 0 || !strings.Contains(errb, "warning: the expression can never hold") {
 		t.Errorf("exit %d stderr %q", code, errb)
@@ -45,9 +56,8 @@ func TestCompileWarningsGoToStderr(t *testing.T) {
 }
 
 func TestConfigFileAndFlagPrecedence(t *testing.T) {
-	dir, empty := t.TempDir(), t.TempDir()
-	t.Chdir(empty)                     // no stray ./filterc.toml
-	t.Setenv("XDG_CONFIG_HOME", empty) // no stray ~/.config/filterc/filterc.toml
+	isolateConfig(t)
+	dir := t.TempDir() // the explicit config lives outside the isolated lookup dirs
 	path := filepath.Join(dir, "filterc.toml")
 	os.WriteFile(path, []byte(`
 listen = ":9999"
@@ -83,6 +93,7 @@ limit = 300
 }
 
 func TestScanCommandNeedsGolbat(t *testing.T) {
+	isolateConfig(t)
 	code, _, errb := runCLI(t, "scan", "iv == 100")
 	if code != 1 || !strings.Contains(errb, "golbat url") {
 		t.Errorf("exit %d stderr %q", code, errb)
