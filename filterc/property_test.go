@@ -22,8 +22,8 @@ var genRangeFields = []struct {
 	{fAtk, []int{-1, 0, 14, 15}},
 	{fDef, []int{-1, 0, 14, 15}},
 	{fSta, []int{-1, 0, 14, 15}},
-	{fLevel, []int{-1, 1, 29, 30, 31, 50}},
-	{fCp, []int{-1, 0, 1499, 1500, 1501}},
+	{fLevel, []int{-1, 1, 29, 30, 31, 50, 127}},
+	{fCp, []int{-1, 0, 1499, 1500, 1501, 32767}},
 	{fGender, []int{-1, 0, 1, 2, 3}},
 	{fSize, []int{-1, 1, 3, 5}},
 	{fLittle, []int{1, 100, 101, 4095, 4096}},
@@ -35,8 +35,49 @@ var genOps = []string{"==", "!=", "<", "<=", ">", ">="}
 
 func pick[T any](rng *rand.Rand, xs []T) T { return xs[rng.Intn(len(xs))] }
 
+// genSpecies is a species literal in any spelling: by id, literal first,
+// lists, ranges and their negations. Ids stay within 1..5 so clauses
+// overlap.
+func genSpecies(rng *rand.Rand) string {
+	id := func() int { return 1 + rng.Intn(5) }
+	switch rng.Intn(7) {
+	case 0:
+		return fmt.Sprintf("pokemon == %d", id())
+	case 1:
+		return fmt.Sprintf("%d == pokemon", id())
+	case 2:
+		return fmt.Sprintf("pokemon in [%d, %d, %d]", id(), id(), id())
+	case 3:
+		return fmt.Sprintf("pokemon in %d..%d", id(), id())
+	case 4:
+		return fmt.Sprintf("pokemon != %d", id())
+	case 5:
+		return fmt.Sprintf("%d != pokemon", id())
+	}
+	return fmt.Sprintf("pokemon not in [%d, %d]", id(), id())
+}
+
+// genForm is a form literal in any spelling, over forms 0..3.
+func genForm(rng *rand.Rand) string {
+	switch rng.Intn(7) {
+	case 0:
+		return fmt.Sprintf("form == %d", rng.Intn(4))
+	case 1:
+		return fmt.Sprintf("form != %d", rng.Intn(4))
+	case 2:
+		return fmt.Sprintf("form in [%d, %d]", rng.Intn(4), rng.Intn(4))
+	case 3:
+		return fmt.Sprintf("form not in [%d, %d]", rng.Intn(4), rng.Intn(4))
+	case 4:
+		return fmt.Sprintf("form in %d..%d", rng.Intn(4), rng.Intn(4))
+	case 5:
+		return fmt.Sprintf("%d %s form", rng.Intn(4), pick(rng, genOps))
+	}
+	return fmt.Sprintf("form %s %d", pick(rng, genOps), rng.Intn(4))
+}
+
 func genAtom(rng *rand.Rand) string {
-	switch rng.Intn(12) {
+	switch rng.Intn(16) {
 	case 0, 1, 2, 3: // range comparison, sometimes with the literal first
 		g := pick(rng, genRangeFields)
 		op, v := pick(rng, genOps), pick(rng, g.vals)
@@ -88,6 +129,14 @@ func genAtom(rng *rand.Rand) string {
 			return fmt.Sprintf("pokemon not in %d..%d", hi-rng.Intn(8), hi)
 		}
 		return fmt.Sprintf("pokemon < %d", 1+rng.Intn(6))
+	case 12: // species lists, ranges and negations with a form, any spelling
+		return "(" + genSpecies(rng) + pick(rng, []string{" && ", " and "}) + genForm(rng) + ")"
+	case 13: // a species with two form literals
+		return "(" + genSpecies(rng) + " && " + genForm(rng) + " and " + genForm(rng) + ")"
+	case 14: // two species literals: the intersection may be small, empty or negative
+		return "(" + genSpecies(rng) + " && " + genSpecies(rng) + ")"
+	case 15:
+		return genSpecies(rng)
 	}
 	// species with a form, by id, comparison or range
 	s := 1 + rng.Intn(4)
@@ -103,11 +152,11 @@ func genExpr(rng *rand.Rand, depth int) string {
 	}
 	switch rng.Intn(5) {
 	case 0, 1:
-		return "(" + genExpr(rng, depth+1) + " && " + genExpr(rng, depth+1) + ")"
+		return "(" + genExpr(rng, depth+1) + pick(rng, []string{" && ", " and "}) + genExpr(rng, depth+1) + ")"
 	case 2, 3:
-		return "(" + genExpr(rng, depth+1) + " || " + genExpr(rng, depth+1) + ")"
+		return "(" + genExpr(rng, depth+1) + pick(rng, []string{" || ", " or "}) + genExpr(rng, depth+1) + ")"
 	}
-	return "!(" + genExpr(rng, depth+1) + ")"
+	return pick(rng, []string{"!(", "not ("}) + genExpr(rng, depth+1) + ")"
 }
 
 func genRow(rng *rand.Rand) row {
@@ -184,8 +233,10 @@ func checkInvariants(t *testing.T, src string, c *Compiled) {
 
 func TestCompileMatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewSource(20260925))
-	const samples = 3000
-	skipped := 0
+	const samples = 5000
+	skipped, gridChecked := 0, 0
+	gridSpecies := []int{1, 2, 3, 4, 5, 6, domains[fPokemon].hi - 7, domains[fPokemon].hi}
+	gridForms := []int{0, 1, 2, 3, 4, domains[fForm].hi}
 	for i := 0; i < samples; i++ {
 		src := genExpr(rng, 0)
 		c, err := Compile(src)
@@ -199,16 +250,32 @@ func TestCompileMatchesReference(t *testing.T) {
 		}
 		checkInvariants(t, src, c)
 		index := indexClauses(c.Filters)
-		for j := 0; j < 40; j++ {
-			r := genRow(rng)
+		check := func(r row) {
 			want := reference(t, src, r) == tTrue
 			if got := matchV3(index, r); got != want {
 				t.Fatalf("expression %q\nrow %+v (pvp %+v)\nmatcher %v, reference %v\nfilters %s", src, r, r.pvp, got, want, mustJSON(c.Filters))
 			}
 		}
+		for j := 0; j < 40; j++ {
+			check(genRow(rng))
+		}
+		// an expression naming forms is checked on every (species, form)
+		// pair of a grid, so every probe branch (exact, species, generic)
+		// is hit: named ids, an unnamed one, the top of the species domain,
+		// named forms, an unnamed one and the top of the form domain
+		if strings.Contains(src, "form") {
+			gridChecked++
+			for _, s := range gridSpecies {
+				for _, f := range gridForms {
+					r := genRow(rng)
+					r.pokemonId, r.form = s, f
+					check(r)
+				}
+			}
+		}
 	}
-	if skipped > samples/2 {
+	if skipped > samples/5 {
 		t.Fatalf("skipped %d of %d samples; the generator negates too many form atoms", skipped, samples)
 	}
-	t.Logf("checked %d expressions (%d skipped)", samples-skipped, skipped)
+	t.Logf("checked %d expressions (%d skipped; %d on the species×form grid)", samples-skipped, skipped, gridChecked)
 }
