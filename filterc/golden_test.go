@@ -49,6 +49,12 @@ func TestCompileGolden(t *testing.T) {
 			`[{"gender":[-1,0,1,3]}]`},
 		{`atk == 15 && def == 15 && sta == 15 && level >= 30 && cp in 1500..2500`,
 			`[{"atk_iv":{"min":15,"max":15},"def_iv":{"min":15,"max":15},"sta_iv":{"min":15,"max":15},"level":{"min":30,"max":127},"cp":{"min":1500,"max":2500}}]`},
+		// literal-first comparisons: a fixed anchor for flip, which the
+		// reference and the generator share with the compiler
+		{`90 <= iv`,
+			`[{"iv":{"min":90,"max":100}}]`},
+		{`5 < cp`,
+			`[{"cp":{"min":6,"max":32767}}]`},
 		// species ranges and comparisons lower to id sets
 		{`pokemon in 1..3 && iv == 100`,
 			`[{"pokemon":[{"id":1},{"id":2},{"id":3}],"iv":{"min":100,"max":100}}]`},
