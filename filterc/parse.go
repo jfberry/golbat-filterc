@@ -286,6 +286,8 @@ func (l *lowerer) warnRange(lit *rangeLit, lo, hi int) {
 	}
 	verdict, ok := holds(f, lit.set)
 	switch {
+	case lo > hi: // empty whatever the domain; `not in` makes it whole
+		l.w.add(lit.pos, "%s: the range %d..%d is empty (%d > %d), so this condition %s", lit.src, lo, hi, lo, hi, verdict)
 	case f == fPokemon && lo < d.lo && hi >= d.lo && !ok:
 		ignored := fmt.Sprint(lo)
 		if lo < 0 {

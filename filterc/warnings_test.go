@@ -57,7 +57,11 @@ func TestWarnings(t *testing.T) {
 		{`iv in 101..200`, []string{"1:1: iv in 101..200: 101 is outside iv's range -1..100, so this condition can never hold", nothing}},
 		{`iv in -1..100`, []string{"1:1: iv in -1..100: iv's range is -1..100, so this condition always holds"}},
 		{`iv not in -1..100`, []string{"1:1: iv not in -1..100: iv's range is -1..100, so this condition can never hold", nothing}},
-		{`iv in 5..1`, []string{nothing}}, // reversed, not out of range
+		// reversed ranges, on any field, even with a bound outside the domain
+		{`iv in 5..1`, []string{"1:1: iv in 5..1: the range 5..1 is empty (5 > 1), so this condition can never hold", nothing}},
+		{`iv >= 90 || pokemon in 5..1`, []string{"1:13: pokemon in 5..1: the range 5..1 is empty (5 > 1), so this condition can never hold"}},
+		{`iv in 200..5`, []string{"1:1: iv in 200..5: the range 200..5 is empty (200 > 5), so this condition can never hold", nothing}},
+		{`iv not in 5..1`, []string{"1:1: iv not in 5..1: the range 5..1 is empty (5 > 1), so this condition always holds"}},
 		{`pokemon in 0..40000`, []string{"1:1: pokemon in 0..40000: 0 is outside pokemon's range 1..32767, so this condition always holds"}},
 		{`pokemon in 5..40000 && iv == 1`, []string{"1:1: pokemon in 5..40000: 40000 is outside pokemon's range 1..32767; the range is clipped to 5..32767"}},
 
