@@ -18,7 +18,7 @@ func TestDomains(t *testing.T) {
 		fPokemon: {1, 32767}, fForm: {0, 32767},
 		fIv: {-1, 100}, fAtk: {-1, 15}, fDef: {-1, 15}, fSta: {-1, 15},
 		fLevel: {-1, 127}, fCp: {-1, 32767}, fGender: {-1, 3}, fSize: {-1, 5},
-		fLittle: {1, 32767}, fGreat: {1, 32767}, fUltra: {1, 32767},
+		fLittle: {1, 4096}, fGreat: {1, 4096}, fUltra: {1, 4096},
 	}
 	for f, d := range want {
 		if domains[f] != d {

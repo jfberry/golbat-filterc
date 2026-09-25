@@ -48,6 +48,17 @@ type interval struct{ lo, hi int }
 // real value meaning "no encounter data" for the encounter fields; PvP
 // ranks have no such member (a pokemon without PvP data has no rank at
 // all) and use 4096 for "has PvP data, unranked in this league".
+//
+// The encounter tops are what the game produces: iv 100 and per-stat IVs
+// 15. Golbat's lookup can hold larger values from legacy rows (lookupIv
+// and lookupInt8 in decoder/pokemonRtree.go saturate at 127), which Golbat
+// treats as garbage; every emitted range stops at these tops, so a
+// compiled filter never returns such rows. Keeping the tops at 100 and 15
+// lets iv >= 90 emit max 100, as a person would write it.
+//
+// PvP ranks are 1..4096: calculatePokemonPvpLookup in
+// decoder/pokemonRtree.go starts each league at 4096 and only lowers it,
+// and ranks start at 1.
 var domains = [nFields]interval{
 	fPokemon: {1, 32767},
 	fForm:    {0, 32767},
@@ -59,7 +70,7 @@ var domains = [nFields]interval{
 	fCp:      {-1, 32767},
 	fGender:  {-1, 3},
 	fSize:    {-1, 5},
-	fLittle:  {1, 32767},
-	fGreat:   {1, 32767},
-	fUltra:   {1, 32767},
+	fLittle:  {1, 4096},
+	fGreat:   {1, 4096},
+	fUltra:   {1, 4096},
 }

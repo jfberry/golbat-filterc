@@ -32,7 +32,7 @@ func TestWarnings(t *testing.T) {
 		{`iv == 100 && ultra not in [1, 2]`, []string{"1:14: ultra not in [1, 2]" + pvp}},
 		// W4 notes W1
 		{`!(great >= 1)`, []string{
-			"1:3: great >= 1: great's range is 1..32767, so this condition always holds",
+			"1:3: great >= 1: great's range is 1..4096, so this condition always holds",
 			"1:3: negating great >= 1" + pvp,
 			nothing + "; note that negated PvP conditions never match pokemon without PvP data",
 		}},
@@ -46,7 +46,10 @@ func TestWarnings(t *testing.T) {
 		// W2: value in range, but the comparison is empty or whole
 		{`iv > 100`, []string{"1:1: iv > 100: iv's range is -1..100, so this condition can never hold", nothing}},
 		{`iv >= -1`, []string{"1:1: iv >= -1: iv's range is -1..100, so this condition always holds"}},
-		{`great < 1`, []string{"1:1: great < 1: great's range is 1..32767, so this condition can never hold", nothing}},
+		{`great < 1`, []string{"1:1: great < 1: great's range is 1..4096, so this condition can never hold", nothing}},
+		// PvP ranks top out at 4096
+		{`great > 4096`, []string{"1:1: great > 4096: great's range is 1..4096, so this condition can never hold", nothing}},
+		{`great >= 5000`, []string{"1:1: great >= 5000: 5000 is outside great's range 1..4096, so this condition can never hold", nothing}},
 		// W2: ranges
 		{`iv in 50..200`, []string{"1:1: iv in 50..200: 200 is outside iv's range -1..100; the range is clipped to 50..100"}},
 		{`iv not in 50..200`, []string{"1:1: iv not in 50..200: 200 is outside iv's range -1..100; the range is clipped to 50..100"}},

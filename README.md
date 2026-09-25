@@ -77,7 +77,9 @@ Semantics follow Golbat's matcher exactly, which the property test in
 `filterc/property_test.go` checks: `-1` is a real value ("no encounter
 data") for the encounter fields, so `!(iv >= 90)` includes un-encountered
 pokemon; PvP ranks are absent for a pokemon with no PvP data (any comparison
-on them is unknown, never true) and `4096` means "unranked in that league".
+on them is unknown, never true), ranks run 1..4096 and `4096` means
+"unranked in that league". `iv` tops out at 100 and `atk`/`def`/`sta` at 15;
+legacy rows Golbat holds with larger values are never returned.
 
 Design: [docs/superpowers/specs/2026-09-25-filter-expression-compiler-design.md](docs/superpowers/specs/2026-09-25-filter-expression-compiler-design.md).
 Background: [UnownHash/Golbat#417](https://github.com/UnownHash/Golbat/issues/417).

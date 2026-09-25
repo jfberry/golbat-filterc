@@ -45,6 +45,12 @@ func TestCompileGolden(t *testing.T) {
 			`[{"pvp_great":{"min":1,"max":100}},{"pvp_little":{"min":1,"max":100}}]`},
 		{`great == 4096`,
 			`[{"pvp_great":{"min":4096,"max":4096}}]`},
+		// PvP complements stop at the 4096 top
+		{`!(great <= 100)`,
+			`[{"pvp_great":{"min":101,"max":4096}}]`},
+		{`ultra != 4096`,
+			`[{"pvp_ultra":{"min":1,"max":4095}}]`},
+		{`great > 4096`, `[]`},
 		{`gender != 2`,
 			`[{"gender":[-1,0,1,3]}]`},
 		{`atk == 15 && def == 15 && sta == 15 && level >= 30 && cp in 1500..2500`,

@@ -95,13 +95,18 @@ applies to compiled output.
 | `cp` | −1..32767 | −1 = no encounter data; storage maximum |
 | `size` | −1..5 | −1 = unknown |
 | `gender` | {−1, 0, 1, 2, 3} | −1 = unknown; 0 unset, 1 male, 2 female, 3 genderless |
-| `little`, `great`, `ultra` | 1..32767 | 4096 = has PvP data but no rank in that league; NULL when the pokemon has no PvP data at all |
+| `little`, `great`, `ultra` | 1..4096 | 4096 = has PvP data but no rank in that league (`calculatePokemonPvpLookup` starts at 4096 and only lowers it); NULL when the pokemon has no PvP data at all |
 
 The `−1` values are real members of their domains because Golbat's lookup
 stores them as values and its matcher compares them as values: `iv in
 -1..100` is the documented way to include un-encountered pokemon. PvP ranks
 are different: a pokemon with no PvP data has no rank values at all, and
 Golbat's matcher fails every PvP condition for it.
+
+The encounter tops (100 for `iv`, 15 for `atk`/`def`/`sta`) are what the
+game produces; Golbat's lookup can hold larger legacy values (its
+`lookupIv`/`lookupInt8` saturate at 127), which it treats as garbage, and a
+compiled filter never returns such rows.
 
 ### Semantics
 
