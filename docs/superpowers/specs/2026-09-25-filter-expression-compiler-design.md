@@ -219,9 +219,11 @@ names, drawn from small sides only:
 - S(c) with a negative small side Sᶜ: `(s, any)` for each s ∈ Sᶜ.
 
 **The key cap counts distinct keys, with pre-checks from interval sizes**:
-a conjunction naming more than the key cap by size is refused at once; the
-sizes of conjunctions whose species small side is positive (whose keys all
-appear in their own clause) are summed and refused over the id cap; only
+a conjunction naming more than the key cap by size is refused at once; each
+conjunction's own-clause entries — |S|·|F| for a positive form small side,
+|S| when F is unconstrained or its small side is negative, 0 for a negative
+species small side (exclusion keys may be shared or become single blocks) —
+are summed from sizes and refused over the id cap; only
 then are keys enumerated conjunction by conjunction into a deduplicated
 set, refused as soon as the distinct count exceeds the key cap. So
 `pokemon > 20000 && pokemon < 20010` names nine keys, a thousand copies of
@@ -271,11 +273,11 @@ allocation it bounds:
 |-----|---------|--------|---------|
 | conjunctions after splitting | 512 | `WithMaxConjunctions` | as DNF forms conjunctions; split refuses a field's product before building it |
 | distinct `(species, form)` keys | 10,000 | `WithMaxKeys` | per conjunction from interval sizes before enumeration, then on the distinct count as keys are collected (before any bucket is computed) |
-| pokemon entries across all clauses, blocks included | 100,000 | `WithMaxIds` | from the summed sizes of positive species small sides before enumeration, then before each entry is appended |
+| pokemon entries across all clauses, blocks included | 100,000 | `WithMaxIds` | from the summed own-clause entries (interval sizes) before enumeration, then before each entry is appended |
 | emitted clauses | 10,000 | `WithMaxClauses` | before each clause is appended |
 
 In one sentence: a conjunction whose own key count exceeds the key cap, or
-positive-small-side key counts summing past the id cap, are refused from
+own-clause entry counts summing past the id cap, are refused from
 interval sizes before anything is enumerated; otherwise keys are collected
 into a deduplicated set and refused once the distinct count exceeds the key
 cap. So the output is bounded by 2 × conjunctions + |D| clauses **and** by the id

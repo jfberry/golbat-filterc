@@ -59,6 +59,21 @@ func (p keyPlan) keyCount() int {
 	return p.species.size() * p.form.size()
 }
 
+// ownEntries is the number of keys the plan's own keyed clause lists, from
+// interval sizes: (s, f) for each species and each form of a positive form
+// small side, or (s, any) for each species when F is unconstrained or its
+// small side is negative (applies is false for the excluded forms' exact
+// keys). A negative species small side names only keys it excludes.
+func (p keyPlan) ownEntries() int {
+	switch {
+	case !p.c.has[fPokemon] || p.speciesNeg:
+		return 0
+	case !p.c.has[fForm] || p.formNeg:
+		return p.species.size()
+	}
+	return p.species.size() * p.form.size()
+}
+
 // appendKeys enumerates the plan's keys: (s, any) for each species on the
 // small side of a negative or form-free S; otherwise (s, f) for each form on
 // F's small side, plus (s, any) when that side is negative (those exact
@@ -140,10 +155,10 @@ func tooManyClauses(limit int) *Error {
 //
 //   - a conjunction naming more than maxKeys keys has more than maxKeys
 //     distinct keys;
-//   - a conjunction whose species small side is positive lists every key it
-//     names in its own clause, so the sum of those counts is a lower bound
-//     on the emitted pokemon entries (negative small sides are left out:
-//     their keys may be shared, or become single block entries).
+//   - every conjunction's own clause lists exactly ownEntries() keys, so
+//     the sum of those counts is a lower bound on the emitted pokemon
+//     entries (the exclusion keys of a negative species or form small side
+//     are left out: they may be shared, or become single block entries).
 //
 // Otherwise keys are enumerated conjunction by conjunction into a
 // deduplicated set, refusing as soon as the distinct count exceeds maxKeys,
@@ -155,10 +170,8 @@ func distinguishedKeys(plans []keyPlan, maxKeys, maxIds int) ([]key, error) {
 		if n > maxKeys {
 			return nil, tooManyKeys(maxKeys)
 		}
-		if p.c.has[fPokemon] && !p.speciesNeg {
-			if listed += n; listed > maxIds {
-				return nil, tooManyIds(maxIds)
-			}
+		if listed += p.ownEntries(); listed > maxIds {
+			return nil, tooManyIds(maxIds)
 		}
 	}
 	seen := map[key]struct{}{}

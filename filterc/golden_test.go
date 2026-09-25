@@ -234,6 +234,24 @@ func TestIdCapPrecheckFromIntervalSizes(t *testing.T) {
 	}
 }
 
+// A negative form small side's exclusion keys are not in the conjunction's
+// own clause, so the id pre-check does not count them: 11 conjunctions each
+// name 5,000 × 2 keys by size (110,000), but list 5,000 each in their own
+// clause; the 5,000 exclusion keys become one block each.
+func TestNegativeFormSmallSidesCompile(t *testing.T) {
+	c, err := Compile("pokemon in 1..5000 && form != 0 && " + oddList("cp", 1, 21))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := 0
+	for _, cl := range c.Filters {
+		entries += len(cl.Pokemon)
+	}
+	if len(c.Filters) != 5011 || entries != 60000 {
+		t.Errorf("%d clauses, %d entries; want 5011, 60000", len(c.Filters), entries)
+	}
+}
+
 // Negative small sides are not counted towards the id pre-check: 20
 // conjunctions each excluding a different 8,000-id range name 160,000 keys
 // by size, but 8,019 distinct ones, emitted mostly as single blocks.
