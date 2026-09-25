@@ -49,7 +49,8 @@ func TestCompileEndpoint(t *testing.T) {
 	if code != 200 || req["limit"] != float64(7) || req["max"].(map[string]any)["lon"] != float64(4) || len(req["filters"].([]any)) != 0 {
 		t.Errorf("override: %d %v", code, out)
 	}
-	if w := out["warnings"].([]any); len(w) != 1 {
+	if w := out["warnings"].([]any); len(w) != 2 || w[0] != "1:1: iv > 100: iv's range is -1..100, so this condition can never hold" ||
+		w[1] != "the expression can never hold; the request matches nothing" {
 		t.Errorf("warnings = %v", w)
 	}
 }

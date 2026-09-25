@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -115,6 +116,9 @@ func runExpression(cmd string, s settings, expression string, stdout, stderr io.
 	}
 	for _, w := range compiled.Warnings {
 		fmt.Fprintf(stderr, "warning: %s\n", w)
+		if line, col, ok := warningPos(w); ok {
+			printCaret(stderr, expression, line, col)
+		}
 	}
 	req := compiled.Request(s.bounds(), s.Bounds.Limit)
 	if cmd == "compile" {
@@ -140,14 +144,34 @@ func runExpression(cmd string, s settings, expression string, stdout, stderr io.
 func reportCompileError(stderr io.Writer, expression string, err error) {
 	fmt.Fprintf(stderr, "error: %v\n", err)
 	var ce *filterc.Error
-	if !errors.As(err, &ce) || ce.Pos.Line < 1 {
-		return
+	if errors.As(err, &ce) {
+		printCaret(stderr, expression, ce.Pos.Line, ce.Pos.Column)
 	}
+}
+
+// printCaret prints the expression's line and a caret under the column;
+// nothing when the position is outside the expression.
+func printCaret(stderr io.Writer, expression string, line, column int) {
 	lines := strings.Split(expression, "\n")
-	if ce.Pos.Line > len(lines) {
+	if line < 1 || line > len(lines) {
 		return
 	}
-	fmt.Fprintf(stderr, "  %s\n  %s^\n", lines[ce.Pos.Line-1], strings.Repeat(" ", max(ce.Pos.Column-1, 0)))
+	fmt.Fprintf(stderr, "  %s\n  %s^\n", lines[line-1], strings.Repeat(" ", max(column-1, 0)))
+}
+
+// warningPos reads the line:column: prefix of a positioned warning.
+func warningPos(w string) (line, column int, ok bool) {
+	head, _, found := strings.Cut(w, ": ")
+	if !found {
+		return 0, 0, false
+	}
+	l, c, found := strings.Cut(head, ":")
+	if !found {
+		return 0, 0, false
+	}
+	line, err1 := strconv.Atoi(l)
+	column, err2 := strconv.Atoi(c)
+	return line, column, err1 == nil && err2 == nil
 }
 
 func writeJSON(stdout, stderr io.Writer, v any, compact bool) int {

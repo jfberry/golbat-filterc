@@ -1,7 +1,9 @@
 package filterc
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/expr-lang/expr/ast"
 	"github.com/expr-lang/expr/file"
@@ -17,7 +19,10 @@ const (
 // and accepting only the subset the compiler understands. The whitelist walk
 // is the type check: every accepted node is a comparison between a known
 // field and an integer, or and/or/not over such comparisons.
-func parse(src string) (node, error) {
+func parse(src string) (node, error) { return lower(src, nil) }
+
+// lower is parse with warnings collected into w (which may be nil).
+func lower(src string, w *warnings) (node, error) {
 	if len(src) > maxExpressionBytes {
 		return nil, errorf(Position{Line: 1, Column: 1}, "expression longer than %d bytes", maxExpressionBytes)
 	}
@@ -29,7 +34,7 @@ func parse(src string) (node, error) {
 		}
 		return nil, &Error{Msg: err.Error(), Pos: Position{Line: 1, Column: 1}}
 	}
-	l := lowerer{t: t}
+	l := lowerer{t: t, w: w}
 	return l.boolean(tree.Node)
 }
 
@@ -65,6 +70,7 @@ func (t posTable) at(from int) Position {
 
 type lowerer struct {
 	t posTable
+	w *warnings
 }
 
 func (l *lowerer) pos(n ast.Node) Position { return l.t.at(n.Location().From) }
@@ -80,7 +86,7 @@ func (l *lowerer) boolean(n ast.Node) (node, error) {
 		case "==", "!=", "<", "<=", ">", ">=":
 			return l.comparison(v)
 		case "in":
-			return l.membership(v)
+			return l.membership(v, false)
 		}
 		return nil, errorf(l.pos(n), "unsupported operator %q", v.Operator)
 	case *ast.UnaryNode:
@@ -89,6 +95,11 @@ func (l *lowerer) boolean(n ast.Node) (node, error) {
 		}
 		if !isBoolean(v.Node) {
 			return nil, errorf(l.pos(n), "%s applies to a comparison; write %s (…)", v.Operator, v.Operator)
+		}
+		// `x not in y` parses as not(x in y) with the not after x;
+		// `not (x in y)` has it before
+		if in, ok := v.Node.(*ast.BinaryNode); ok && in.Operator == "in" && v.Location().From > in.Left.Location().From {
+			return l.membership(in, true)
 		}
 		x, err := l.boolean(v.Node)
 		if err != nil {
@@ -151,7 +162,30 @@ func (l *lowerer) comparison(v *ast.BinaryNode) (node, error) {
 			return nil, err
 		}
 	}
-	return &rangeLit{f: f, set: rangeFromOp(f, op, val), pos: l.pos(fieldSide)}, nil
+	src := fmt.Sprintf("%s %s %d", f, v.Operator, val)
+	if fieldSide != v.Left {
+		src = fmt.Sprintf("%d %s %s", val, v.Operator, f)
+	}
+	lit := &rangeLit{f: f, set: rangeFromOp(f, op, val), pos: l.pos(v.Left), src: src, neg: op == "!="}
+	if verdict, ok := holds(f, lit.set); ok {
+		if d := domains[f]; val < d.lo || val > d.hi {
+			l.w.add(lit.pos, "%s: %d is outside %s's range %d..%d, so this condition %s", src, val, f, d.lo, d.hi, verdict)
+		} else {
+			l.w.add(lit.pos, "%s: %s's range is %d..%d, so this condition %s", src, f, d.lo, d.hi, verdict)
+		}
+	}
+	return lit, nil
+}
+
+// holds says whether a literal's set is the whole domain or empty.
+func holds(f field, set intervalSet) (verdict string, ok bool) {
+	switch {
+	case len(set) == 0:
+		return "can never hold", true
+	case set.equal(intervalSet{domains[f]}):
+		return "always holds", true
+	}
+	return "", false
 }
 
 func flip(op string) string {
@@ -168,13 +202,25 @@ func flip(op string) string {
 	return op
 }
 
-// membership lowers `field in [a, b]` and `field in a..b`.
-func (l *lowerer) membership(v *ast.BinaryNode) (node, error) {
+// membership lowers `field in [a, b]` and `field in a..b`, and their
+// `not in` forms when neg is set.
+func (l *lowerer) membership(v *ast.BinaryNode, neg bool) (node, error) {
 	f, err := l.fieldOf(v.Left)
 	if err != nil {
 		return nil, err
 	}
 	pos := l.pos(v.Left)
+	in := "in"
+	if neg {
+		in = "not in"
+	}
+	lit := func(set intervalSet, src string) *rangeLit {
+		set = set.intersect(intervalSet{domains[f]})
+		if neg {
+			set = set.complement(domains[f])
+		}
+		return &rangeLit{f: f, set: set, pos: pos, src: fmt.Sprintf("%s %s %s", f, in, src), neg: neg}
+	}
 	switch r := v.Right.(type) {
 	case *ast.ArrayNode:
 		vals := make([]int, 0, len(r.Nodes))
@@ -191,10 +237,19 @@ func (l *lowerer) membership(v *ast.BinaryNode) (node, error) {
 			}
 		}
 		ivs := make([]interval, len(vals))
+		strs := make([]string, len(vals))
 		for i, val := range vals {
 			ivs[i] = interval{val, val}
+			strs[i] = fmt.Sprint(val)
 		}
-		return &rangeLit{f: f, set: setOf(ivs...).intersect(intervalSet{domains[f]}), pos: pos}, nil
+		out := lit(setOf(ivs...), "["+strings.Join(strs, ", ")+"]")
+		d := domains[f]
+		for i, val := range vals {
+			if val < d.lo || val > d.hi {
+				l.w.add(l.pos(r.Nodes[i]), "%s: %d is outside %s's range %d..%d and is ignored", out.src, val, f, d.lo, d.hi)
+			}
+		}
+		return out, nil
 	case *ast.BinaryNode:
 		if r.Operator == ".." {
 			lo, err := l.intLit(r.Left)
@@ -205,10 +260,39 @@ func (l *lowerer) membership(v *ast.BinaryNode) (node, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &rangeLit{f: f, set: setOf(interval{lo, hi}).intersect(intervalSet{domains[f]}), pos: pos}, nil
+			out := lit(setOf(interval{lo, hi}), fmt.Sprintf("%d..%d", lo, hi))
+			l.warnRange(out, lo, hi)
+			return out, nil
 		}
 	}
 	return nil, errorf(l.pos(v.Right), "expected a list or a range after in")
+}
+
+// warnRange warns about a range literal lo..hi whose bounds reach outside
+// the field's domain, or which covers the whole domain.
+func (l *lowerer) warnRange(lit *rangeLit, lo, hi int) {
+	f, d := lit.f, domains[lit.f]
+	clipped := setOf(interval{lo, hi}).intersect(intervalSet{d})
+	out, outside := lo, lo < d.lo || lo > d.hi
+	if !outside && (hi < d.lo || hi > d.hi) {
+		out, outside = hi, true
+	}
+	verdict, ok := holds(f, lit.set)
+	switch {
+	case f == fPokemon && lo < d.lo && hi >= d.lo && !ok:
+		ignored := fmt.Sprint(lo)
+		if lo < 0 {
+			ignored = fmt.Sprintf("%d..0", lo)
+		}
+		l.w.add(lit.pos, "%s: species ids start at 1; %s is ignored", lit.src, ignored)
+	case ok && outside:
+		l.w.add(lit.pos, "%s: %d is outside %s's range %d..%d, so this condition %s", lit.src, out, f, d.lo, d.hi, verdict)
+	case ok && lo <= hi:
+		l.w.add(lit.pos, "%s: %s's range is %d..%d, so this condition %s", lit.src, f, d.lo, d.hi, verdict)
+	case outside:
+		c := clipped[0]
+		l.w.add(lit.pos, "%s: %d is outside %s's range %d..%d; the range is clipped to %d..%d", lit.src, out, f, d.lo, d.hi, c.lo, c.hi)
+	}
 }
 
 func (l *lowerer) fieldOf(n ast.Node) (field, error) {

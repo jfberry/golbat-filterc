@@ -81,7 +81,7 @@ func TestCompileGolden(t *testing.T) {
 }
 
 func TestCompileWarnsWhenNothingMatches(t *testing.T) {
-	_, warnings := compileJSON(t, `iv > 100`)
+	_, warnings := compileJSON(t, `iv >= 90 && iv < 50`)
 	if len(warnings) != 1 || warnings[0] != "the expression can never hold; the request matches nothing" {
 		t.Errorf("warnings = %q", warnings)
 	}
@@ -168,7 +168,7 @@ func TestIdCapRefusesBeforeBuilding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conjs, err := toDNF(nnf(n), DefaultMaxConjunctions)
+	conjs, err := toDNF(nnf(n, nil), DefaultMaxConjunctions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestIdCapPrecheckFromIntervalSizes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conjs, err := toDNF(nnf(n), DefaultMaxConjunctions)
+	conjs, err := toDNF(nnf(n, nil), DefaultMaxConjunctions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestKeyCapRefusesBeforeBuilding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conjs, err := toDNF(nnf(n), DefaultMaxConjunctions)
+	conjs, err := toDNF(nnf(n, nil), DefaultMaxConjunctions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestSpeciesRangesRefuseBeforeEnumerating(t *testing.T) {
 	}
 	bytes := allocDuring(func() {
 		var conjs []conjunction
-		if conjs, err = toDNF(nnf(n), DefaultMaxConjunctions); err != nil {
+		if conjs, err = toDNF(nnf(n, nil), DefaultMaxConjunctions); err != nil {
 			return
 		}
 		if conjs, err = split(conjs, DefaultMaxConjunctions); err != nil {

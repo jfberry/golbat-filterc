@@ -55,6 +55,22 @@ func TestCompileWarningsGoToStderr(t *testing.T) {
 	}
 }
 
+// A positioned warning gets the same caret lines as an error; the
+// unpositioned "can never hold" warning does not.
+func TestCompileWarningShowsCaret(t *testing.T) {
+	isolateConfig(t)
+	code, out, errb := runCLI(t, "compile", "iv >= 90 && gender in [9]")
+	if code != 0 || out == "" {
+		t.Fatalf("exit %d stdout %q", code, out)
+	}
+	want := "warning: 1:24: gender in [9]: 9 is outside gender's range -1..3 and is ignored\n" +
+		"  iv >= 90 && gender in [9]\n  " + strings.Repeat(" ", 23) + "^\n" +
+		"warning: the expression can never hold; the request matches nothing\n"
+	if errb != want {
+		t.Errorf("stderr %q\nwant %q", errb, want)
+	}
+}
+
 func TestConfigFileAndFlagPrecedence(t *testing.T) {
 	isolateConfig(t)
 	dir := t.TempDir() // the explicit config lives outside the isolated lookup dirs

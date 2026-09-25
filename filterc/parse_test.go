@@ -16,15 +16,17 @@ func TestParseLowers(t *testing.T) {
 		{"iv != 50", "iv{[-1,49],[51,100]}"},
 		{"iv > 100", "iv{}"},
 		{"iv in -1..100", "iv{[-1,100]}"},
-		{"level not in 1..29", "not(level{[1,29]})"},
+		{"level not in 1..29", "level{[-1,0],[30,127]}"},
 		{"gender in [3, 1]", "gender{[1,1],[3,3]}"},
 		{"gender in []", "gender{}"},
 		{"pokemon in [4, 1, 4]", "pokemon{[1,1],[4,4]}"},
 		{"pokemon != 710", "pokemon{[1,709],[711,32767]}"},
-		{"pokemon not in [1, 4]", "not(pokemon{[1,1],[4,4]})"},
+		{"pokemon not in [1, 4]", "pokemon{[2,3],[5,32767]}"},
 		{"pokemon == 1 and form == 0", "and(pokemon{[1,1]},form{[0,0]})"},
 		{"!(iv >= 90) || great <= 100 && cp == 1500", "or(not(iv{[90,100]}),and(great{[1,100]},cp{[1500,1500]}))"},
 		{"not (great <= 100)", "not(great{[1,100]})"},
+		// `x not in y` lowers to one negative literal; `not (x in y)` keeps the not
+		{"not (level in 1..29)", "not(level{[1,29]})"},
 		{"great == 4096", "great{[4096,4096]}"},
 		// pokemon and form are interval sets over their domains like any
 		// other field; nothing is enumerated while lowering
@@ -34,7 +36,7 @@ func TestParseLowers(t *testing.T) {
 		{"pokemon == 1 && form > 0", "and(pokemon{[1,1]},form{[1,32767]})"},
 		{"5 > pokemon", "pokemon{[1,4]}"},
 		{"pokemon in 0..3", "pokemon{[1,3]}"},
-		{"pokemon not in 1..3", "not(pokemon{[1,3]})"},
+		{"pokemon not in 1..3", "pokemon{[4,32767]}"},
 		{"pokemon >= 1", "pokemon{[1,32767]}"},
 		{"pokemon > 32767", "pokemon{}"},
 		{"pokemon in 5..1", "pokemon{}"},

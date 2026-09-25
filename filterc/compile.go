@@ -36,11 +36,12 @@ func Compile(expression string, opts ...Option) (*Compiled, error) {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	n, err := parse(expression)
+	w := &warnings{}
+	n, err := lower(expression, w)
 	if err != nil {
 		return nil, err
 	}
-	conjs, err := toDNF(nnf(n), o.maxConjunctions)
+	conjs, err := toDNF(nnf(n, w), o.maxConjunctions)
 	if err != nil {
 		return nil, err
 	}
@@ -54,9 +55,13 @@ func Compile(expression string, opts ...Option) (*Compiled, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Compiled{Filters: clauses}
+	c := &Compiled{Filters: clauses, Warnings: w.list()}
 	if len(clauses) == 0 {
-		c.Warnings = append(c.Warnings, "the expression can never hold; the request matches nothing")
+		msg := "the expression can never hold; the request matches nothing"
+		if w.pvpNegated {
+			msg += "; note that negated PvP conditions never match pokemon without PvP data"
+		}
+		c.Warnings = append(c.Warnings, msg)
 	}
 	return c, nil
 }

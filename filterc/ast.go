@@ -19,6 +19,12 @@ type rangeLit struct {
 	f   field
 	set intervalSet
 	pos Position
+	// src is the literal as written (field op value, value op field,
+	// field [not] in [...] or lo..hi), for warnings; neg is true when the
+	// author wrote it in a negative form (!= or not in), so set is already
+	// a complement.
+	src string
+	neg bool
 }
 
 func (*andNode) isNode()  {}

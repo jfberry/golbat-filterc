@@ -15,7 +15,7 @@ func pipeline(t *testing.T, src string, maxConj int) (string, error) {
 	if err != nil {
 		t.Fatalf("%q: parse: %v", src, err)
 	}
-	conjs, err := toDNF(nnf(n), maxConj)
+	conjs, err := toDNF(nnf(n, nil), maxConj)
 	if err != nil {
 		return "", err
 	}
@@ -132,7 +132,7 @@ func TestSplitChecksCapBeforeBuilding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conjs, err := toDNF(nnf(n), 512)
+	conjs, err := toDNF(nnf(n, nil), 512)
 	if err != nil {
 		t.Fatal(err)
 	}
