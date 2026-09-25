@@ -1,6 +1,12 @@
 package filterc
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/expr-lang/expr/file"
+)
 
 func TestParseLowers(t *testing.T) {
 	cases := []struct{ src, want string }{
@@ -108,6 +114,127 @@ func TestParseErrorPositionsNonASCII(t *testing.T) {
 		}
 		if e.Pos != c.want {
 			t.Errorf("%q: position %+v, want %+v (%s)", c.src, e.Pos, c.want, e.Msg)
+		}
+	}
+}
+
+// Positions come from per-parse tables, so a long expression's positions
+// cost no re-scan of the source per node: a 64 KB list of 8,000 values
+// lowers in well under 16 MiB.
+func TestParseLongListAllocations(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("cp in [")
+	for i := 0; i < 8000; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprint(&b, 4*i+1)
+	}
+	b.WriteString("]")
+	src := b.String()
+	if len(src) > maxExpressionBytes || len(src) < maxExpressionBytes*3/4 {
+		t.Fatalf("source is %d bytes; want close to %d", len(src), maxExpressionBytes)
+	}
+	var n node
+	var err error
+	bytes := allocDuring(func() { n, err = parse(src) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lit, ok := n.(*rangeLit); !ok || len(lit.set) != 8000 {
+		t.Fatalf("lowered to %T, want one cp literal of 8000 intervals", n)
+	}
+	if bytes > 16<<20 {
+		t.Errorf("parse allocated %d MiB", bytes>>20)
+	}
+}
+
+// Every literal records its position: a 64 KB line of 2,000 comparisons
+// (Expr's node limit bounds the count; spaces pad it to the byte limit)
+// must not re-scan the source per literal.
+func TestParseLongChainAllocations(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 2000; i++ {
+		if i > 0 {
+			b.WriteString(" || ")
+		}
+		fmt.Fprintf(&b, "cp == %-20d", i)
+	}
+	src := b.String()
+	if len(src) > maxExpressionBytes || len(src) < maxExpressionBytes*3/4 {
+		t.Fatalf("source is %d bytes; want close to %d", len(src), maxExpressionBytes)
+	}
+	var err error
+	bytes := allocDuring(func() { _, err = parse(src) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes > 16<<20 {
+		t.Errorf("parse allocated %d MiB", bytes>>20)
+	}
+}
+
+// End to end, including the parse: 1,500 half-domain species ranges reach
+// the key cap in well under 16 MiB.
+func TestCompileSpeciesRangesAllocations(t *testing.T) {
+	src := strings.Repeat("pokemon in 1..16383 && ", 1499) + "pokemon in 1..16383"
+	var err error
+	bytes := allocDuring(func() { _, err = Compile(src) })
+	if err == nil || err.Error() != fmt.Sprintf("1:1: expression names more than %d species/form keys; simplify it", DefaultMaxKeys) {
+		t.Errorf("err = %v", err)
+	}
+	if bytes > 16<<20 {
+		t.Errorf("Compile allocated %d MiB before refusing", bytes>>20)
+	}
+}
+
+// Positions on later lines and after multi-byte runes, from the tables.
+func TestParseErrorPositionsMultiline(t *testing.T) {
+	cases := []struct {
+		src  string
+		want Position
+	}{
+		{"iv == 1 &&\n  x == 2", Position{Line: 2, Column: 3, Offset: 13}},
+		{"iv == 1 &&\n\n/* é */ level == 1.5", Position{Line: 3, Column: 18, Offset: 30}},
+		{"iv == 1\n&& pokemon == 0", Position{Line: 2, Column: 15, Offset: 22}},
+		{"iv == 1 &&\n", Position{Line: 1, Column: 11, Offset: 10}}, // Expr places EOF at the last token
+	}
+	for _, c := range cases {
+		_, err := parse(c.src)
+		e, ok := err.(*Error)
+		if !ok {
+			t.Errorf("%q: error %v, want *Error", c.src, err)
+			continue
+		}
+		if e.Pos != c.want {
+			t.Errorf("%q: position %+v, want %+v (%s)", c.src, e.Pos, c.want, e.Msg)
+		}
+	}
+}
+
+// The table agrees with Expr's own Bind (line, column) and a rune walk
+// (byte offset) at every offset, past the end included.
+func TestPosTableMatchesBind(t *testing.T) {
+	for _, src := range []string{
+		"", "iv == 1", "a\nb", "\n\n", "é\nüx\n", "/* é */ iv == 1\n&& cp > 2\n", "\xff\xfe\n\xff", "a\r\nb\tc",
+	} {
+		tab := newPosTable(src)
+		runes := len([]rune(src))
+		for from := 0; from <= runes+2; from++ {
+			e := &file.Error{Location: file.Location{From: from}}
+			e.Bind(file.NewSource(src))
+			off, n := len(src), 0
+			for i := range src {
+				if n == from {
+					off = i
+					break
+				}
+				n++
+			}
+			want := Position{Line: e.Line, Column: e.Column + 1, Offset: off}
+			if got := tab.at(from); got != want {
+				t.Errorf("%q at %d: %+v, want %+v", src, from, got, want)
+			}
 		}
 	}
 }

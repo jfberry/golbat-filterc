@@ -1,6 +1,8 @@
 package filterc
 
 import (
+	"slices"
+
 	"github.com/expr-lang/expr/ast"
 	"github.com/expr-lang/expr/file"
 	"github.com/expr-lang/expr/parser"
@@ -19,27 +21,53 @@ func parse(src string) (node, error) {
 	if len(src) > maxExpressionBytes {
 		return nil, errorf(Position{Line: 1, Column: 1}, "expression longer than %d bytes", maxExpressionBytes)
 	}
+	t := newPosTable(src)
 	tree, err := parser.Parse(src)
 	if err != nil {
 		if fe, ok := err.(*file.Error); ok {
-			return nil, &Error{Msg: fe.Message, Pos: Position{Line: fe.Line, Column: fe.Column + 1, Offset: byteOffset(src, fe.From)}}
+			return nil, &Error{Msg: fe.Message, Pos: t.at(fe.From)}
 		}
 		return nil, &Error{Msg: err.Error(), Pos: Position{Line: 1, Column: 1}}
 	}
-	l := lowerer{src: tree.Source, raw: src}
+	l := lowerer{t: t}
 	return l.boolean(tree.Node)
 }
 
-type lowerer struct {
-	src file.Source
-	raw string
+// posTable converts Expr's rune offsets to positions without re-scanning
+// the source: built once per parse, each lookup is a binary search over
+// the line starts.
+type posTable struct {
+	runeToByte []int // byte offset of each rune index, plus one past the end
+	lineStarts []int // rune index of each line start
 }
 
-func (l *lowerer) pos(n ast.Node) Position {
-	e := &file.Error{Location: n.Location()}
-	e.Bind(l.src)
-	return Position{Line: e.Line, Column: e.Column + 1, Offset: byteOffset(l.raw, n.Location().From)}
+func newPosTable(src string) posTable {
+	t := posTable{runeToByte: make([]int, 0, len(src)+1), lineStarts: []int{0}}
+	for i, r := range src {
+		t.runeToByte = append(t.runeToByte, i)
+		if r == '\n' {
+			t.lineStarts = append(t.lineStarts, len(t.runeToByte))
+		}
+	}
+	t.runeToByte = append(t.runeToByte, len(src))
+	return t
 }
+
+// at is the position of rune offset from, clamped to the source.
+func (t posTable) at(from int) Position {
+	from = min(max(from, 0), len(t.runeToByte)-1)
+	line, found := slices.BinarySearch(t.lineStarts, from)
+	if !found {
+		line--
+	}
+	return Position{Line: line + 1, Column: from - t.lineStarts[line] + 1, Offset: t.runeToByte[from]}
+}
+
+type lowerer struct {
+	t posTable
+}
+
+func (l *lowerer) pos(n ast.Node) Position { return l.t.at(n.Location().From) }
 
 func (l *lowerer) boolean(n ast.Node) (node, error) {
 	switch v := n.(type) {
@@ -249,17 +277,4 @@ func rangeFromOp(f field, op string, v int) intervalSet {
 		raw = interval{v, d.hi}
 	}
 	return setOf(raw).intersect(intervalSet{d})
-}
-
-// byteOffset converts Expr's rune offset into src to a byte offset, clamped
-// to the end of the source.
-func byteOffset(src string, runeOff int) int {
-	n := 0
-	for i := range src {
-		if n == runeOff {
-			return i
-		}
-		n++
-	}
-	return len(src)
 }
