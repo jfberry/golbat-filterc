@@ -3,6 +3,7 @@ package filterc
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/expr-lang/expr/ast"
@@ -181,15 +182,19 @@ func (l *lowerer) comparison(v *ast.BinaryNode) (node, error) {
 	return lit, nil
 }
 
-// holds says whether a literal's set is the whole domain or empty.
+// holds says whether a literal's set is the whole domain or empty. A PvP
+// literal over the whole domain is not a no-op: Golbat fails it for every
+// pokemon without PvP data, so it reads as "has PvP data".
 func holds(f field, set intervalSet) (verdict string, ok bool) {
 	switch {
 	case len(set) == 0:
 		return "can never hold", true
-	case set.equal(intervalSet{domains[f]}):
-		return "always holds", true
+	case !set.equal(intervalSet{domains[f]}):
+		return "", false
+	case f.isPvp():
+		return "holds for every pokemon with PvP data and excludes pokemon without PvP data", true
 	}
-	return "", false
+	return "always holds", true
 }
 
 func flip(op string) string {
@@ -251,9 +256,22 @@ func (l *lowerer) membership(v *ast.BinaryNode, neg bool) (node, error) {
 		}
 		out := lit(setOf(ivs...), "["+strings.Join(strs, ", ")+"]")
 		d := domains[f]
+		inDomain := 0
 		for i, val := range vals {
 			if val < d.lo || val > d.hi {
 				l.w.add(l.pos(r.Nodes[i]), "%s: %d is outside %s's range %d..%d and is ignored", out.src, val, f, d.lo, d.hi)
+			} else {
+				inDomain++
+			}
+		}
+		if verdict, ok := holds(f, out.set); ok {
+			switch {
+			case len(vals) == 0:
+				l.w.add(pos, "%s: the list is empty, so this condition %s", out.src, verdict)
+			case inDomain == 0:
+				l.w.add(pos, "%s: no listed value is in %s's range %d..%d, so this condition %s", out.src, f, d.lo, d.hi, verdict)
+			default:
+				l.w.add(pos, "%s: %s's range is %d..%d, so this condition %s", out.src, f, d.lo, d.hi, verdict)
 			}
 		}
 		return out, nil
@@ -343,7 +361,7 @@ func (l *lowerer) intLit(n ast.Node) (int, error) {
 // floatError names a float literal as written and, when Expr renders it
 // differently (1e2, 100.0), the value it stands for.
 func (l *lowerer) floatError(at ast.Node, f *ast.FloatNode, sign string) error {
-	rendered := sign + f.String()
+	rendered := sign + strconv.FormatFloat(f.Value, 'f', -1, 64)
 	loc := f.Location()
 	if loc.From >= 0 && loc.From < loc.To && loc.To < len(l.t.runeToByte) {
 		if text := sign + l.src[l.t.runeToByte[loc.From]:l.t.runeToByte[loc.To]]; text != rendered {

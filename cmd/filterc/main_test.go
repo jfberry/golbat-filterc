@@ -63,7 +63,9 @@ func TestCompileWarningShowsCaret(t *testing.T) {
 	if code != 0 || out == "" {
 		t.Fatalf("exit %d stdout %q", code, out)
 	}
-	want := "warning: 1:24: gender in [9]: 9 is outside gender's range -1..3 and is ignored\n" +
+	want := "warning: 1:13: gender in [9]: no listed value is in gender's range -1..3, so this condition can never hold\n" +
+		"  iv >= 90 && gender in [9]\n  " + strings.Repeat(" ", 12) + "^\n" +
+		"warning: 1:24: gender in [9]: 9 is outside gender's range -1..3 and is ignored\n" +
 		"  iv >= 90 && gender in [9]\n  " + strings.Repeat(" ", 23) + "^\n" +
 		"warning: the expression can never hold; the request matches nothing\n"
 	if errb != want {

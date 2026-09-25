@@ -65,6 +65,7 @@ func TestParseErrors(t *testing.T) {
 		{"iv == 1e2", "1:7: expected an integer, got a float (1e2 is 100)"},
 		{"iv == 100.0", "1:7: expected an integer, got a float (100.0 is 100)"},
 		{"iv == -1.5", "1:7: expected an integer, got a float (-1.5)"},
+		{"iv == 1e10", "1:7: expected an integer, got a float (1e10 is 10000000000)"},
 		{"iv in [1, 2.5]", "1:11: expected an integer, got a float (2.5)"},
 		{"", "1:1: empty expression"},
 		{" \n\t ", "1:1: empty expression"},

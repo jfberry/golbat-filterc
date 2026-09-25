@@ -41,6 +41,10 @@ func (f field) String() string { return fieldNames[f] }
 // rather than a condition inside a clause.
 func (f field) isSpecies() bool { return f == fPokemon || f == fForm }
 
+// isPvp reports whether f is a PvP rank, absent for a pokemon without PvP
+// data.
+func (f field) isPvp() bool { return f == fLittle || f == fGreat || f == fUltra }
+
 // interval is a closed integer interval, lo <= hi.
 type interval struct{ lo, hi int }
 

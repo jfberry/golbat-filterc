@@ -35,9 +35,15 @@ const noPvpData = "never matches a pokemon without PvP data; a pokemon with no P
 
 // warnNegatedPvp warns about a PvP literal that ends up complemented: by an
 // enclosing not (and not written negative), or written negative (!=, not
-// in) and not negated again.
+// in) and not negated again. A literal over the whole PvP domain already
+// has its own warning saying it excludes pokemon without PvP data, so it
+// gets no second one.
 func warnNegatedPvp(v *rangeLit, neg bool, w *warnings) {
-	if w == nil || (v.f != fLittle && v.f != fGreat && v.f != fUltra) || neg == v.neg {
+	if w == nil || !v.f.isPvp() || neg == v.neg {
+		return
+	}
+	w.pvpNegated = true
+	if v.set.equal(intervalSet{domains[v.f]}) {
 		return
 	}
 	if neg {
@@ -45,5 +51,4 @@ func warnNegatedPvp(v *rangeLit, neg bool, w *warnings) {
 	} else {
 		w.add(v.pos, "%s %s", v.src, noPvpData)
 	}
-	w.pvpNegated = true
 }

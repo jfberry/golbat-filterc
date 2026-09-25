@@ -99,8 +99,9 @@ applies to compiled output.
 | `little`, `great`, `ultra` | 1..4096 | 4096 = has PvP data but no rank in that league (`calculatePokemonPvpLookup` starts at 4096 and only lowers it); NULL when the pokemon has no PvP data at all |
 
 The `−1` values are real members of their domains because Golbat's lookup
-stores them as values and its matcher compares them as values: `iv in
--1..100` is the documented way to include un-encountered pokemon. PvP ranks
+stores them as values and its matcher compares them as values: to include
+un-encountered pokemon, leave `iv` unconstrained (or write `iv in -1..100`,
+which the compiler notes is the whole domain). PvP ranks
 are different: a pokemon with no PvP data has no rank values at all, and
 Golbat's matcher fails every PvP condition for it.
 
@@ -335,8 +336,14 @@ positioned ones.
 - **Value outside the domain**, when the literal is then empty or the whole
   domain (`iv > 200` can never hold, `iv < 200` always holds), or when an
   in-range comparison is (`iv > 100`, `iv >= -1`); a range reaching outside
-  the domain is reported as clipped (`iv in 50..200` is 50..100).
-- **List member outside the domain**: ignored, reported at the member.
+  the domain is reported as clipped (`iv in 50..200` is 50..100). On a PvP
+  field a whole-domain literal (`great <= 4096`) is not a no-op: it holds
+  for every pokemon with PvP data and excludes those without, and says so
+  (with no separate negated-PvP warning for that literal).
+- **Reversed range**: `iv in 5..1` is empty and can never hold.
+- **List member outside the domain**: ignored, reported at the member. A
+  list that leaves the literal empty or whole (`gender in []`, `gender in
+  [7]`, `iv not in [200]`) also gets a verdict at the literal.
 - **Species range below 1**: `pokemon in 0..3` ignores 0.
 - **Nothing can hold**: the request matches nothing (with a note when a
   complemented PvP literal was warned about).

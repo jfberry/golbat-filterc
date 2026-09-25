@@ -9,6 +9,7 @@ import (
 const nothing = "the expression can never hold; the request matches nothing"
 
 func TestWarnings(t *testing.T) {
+	const hasPvp = "so this condition holds for every pokemon with PvP data and excludes pokemon without PvP data"
 	const pvp = " never matches a pokemon without PvP data; a pokemon with no PvP data fails every PvP comparison, negated or not"
 	cases := []struct {
 		src  string
@@ -30,12 +31,17 @@ func TestWarnings(t *testing.T) {
 		{`great != 4096`, []string{"1:1: great != 4096" + pvp}},
 		{`great not in 1..10`, []string{"1:1: great not in 1..10" + pvp}},
 		{`iv == 100 && ultra not in [1, 2]`, []string{"1:14: ultra not in [1, 2]" + pvp}},
-		// W4 notes W1
+		// a PvP literal over the whole domain means "has PvP data": one
+		// warning saying so, and no W1 on top of it; W4 still notes the negation
 		{`!(great >= 1)`, []string{
-			"1:3: great >= 1: great's range is 1..4096, so this condition always holds",
-			"1:3: negating great >= 1" + pvp,
+			"1:3: great >= 1: great's range is 1..4096, " + hasPvp,
 			nothing + "; note that negated PvP conditions never match pokemon without PvP data",
 		}},
+		{`great <= 4096`, []string{"1:1: great <= 4096: great's range is 1..4096, " + hasPvp}},
+		{`great in 1..4096`, []string{"1:1: great in 1..4096: great's range is 1..4096, " + hasPvp}},
+		{`great != 0`, []string{"1:1: great != 0: 0 is outside great's range 1..4096, " + hasPvp}},
+		{`great < 5000`, []string{"1:1: great < 5000: 5000 is outside great's range 1..4096, " + hasPvp}},
+		{`little not in []`, []string{"1:1: little not in []: the list is empty, " + hasPvp}},
 
 		// W2: comparison value outside the domain
 		{`iv < 200`, []string{"1:1: iv < 200: 200 is outside iv's range -1..100, so this condition always holds"}},
@@ -70,7 +76,18 @@ func TestWarnings(t *testing.T) {
 			"1:15: gender in [1, 7, 9]: 7 is outside gender's range -1..3 and is ignored",
 			"1:18: gender in [1, 7, 9]: 9 is outside gender's range -1..3 and is ignored",
 		}},
-		{`iv not in [200]`, []string{"1:12: iv not in [200]: 200 is outside iv's range -1..100 and is ignored"}},
+		// list verdicts, at the literal (so before its members' W3)
+		{`iv not in [200]`, []string{
+			"1:1: iv not in [200]: no listed value is in iv's range -1..100, so this condition always holds",
+			"1:12: iv not in [200]: 200 is outside iv's range -1..100 and is ignored",
+		}},
+		{`gender in [7]`, []string{
+			"1:1: gender in [7]: no listed value is in gender's range -1..3, so this condition can never hold",
+			"1:12: gender in [7]: 7 is outside gender's range -1..3 and is ignored",
+			nothing,
+		}},
+		{`gender in []`, []string{"1:1: gender in []: the list is empty, so this condition can never hold", nothing}},
+		{`gender in [-1, 0, 1, 2, 3]`, []string{"1:1: gender in [-1, 0, 1, 2, 3]: gender's range is -1..3, so this condition always holds"}},
 
 		// W5: a species range reaching below 1
 		{`pokemon in 0..3 && iv == 100`, []string{"1:1: pokemon in 0..3: species ids start at 1; 0 is ignored"}},
@@ -81,6 +98,7 @@ func TestWarnings(t *testing.T) {
 		// source order across lines and stages
 		{"!(great <= 1) ||\n  gender in [9]", []string{
 			"1:3: negating great <= 1" + pvp,
+			"2:3: gender in [9]: no listed value is in gender's range -1..3, so this condition can never hold",
 			"2:14: gender in [9]: 9 is outside gender's range -1..3 and is ignored",
 		}},
 	}

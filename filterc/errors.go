@@ -49,7 +49,9 @@ func (w *warnings) add(pos Position, format string, args ...any) {
 }
 
 // list formats the warnings like errors (line:column: message), in source
-// order, dropping repeats of the same text.
+// order. Repeats of the same formatted text (position included) are
+// dropped: a guard against one literal being warned twice, not a feature;
+// two literals with the same message keep a caret each.
 func (w *warnings) list() []string {
 	if w == nil || len(w.items) == 0 {
 		return nil

@@ -90,8 +90,10 @@ Warnings (on stderr from the CLI, with a caret; in `"warnings"` from the
 server) point at literals that compile but probably not as meant:
 
 - a negated PvP condition (`!(great <= 100)`, `great != 4096`, `great not in 1..10`) never matches a pokemon without PvP data;
-- a value outside the field's range makes a condition always or never hold (`iv < 200`, `iv > 100`), or clips a range (`iv in 50..200`);
-- a list member outside the field's range is ignored (`gender in [1, 7]`);
+- a value outside the field's range makes a condition always or never hold (`iv < 200`, `iv == 200`), or clips a range (`iv in 50..200`);
+- a comparison that covers the whole range or none of it, with the value in range, says so (`iv > 100`, `iv >= -1`); on PvP fields a whole-range condition (`great <= 4096`) means "has PvP data" and the warning says that instead;
+- a reversed range is empty (`iv in 5..1`);
+- a list member outside the field's range is ignored (`gender in [1, 7]`), and a list that leaves nothing or everything (`gender in []`, `gender in [7]`) says so;
 - a species range below 1 ignores the ids under 1 (`pokemon in 0..3`);
 - an expression that can never hold matches nothing.
 
