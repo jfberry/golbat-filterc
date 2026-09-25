@@ -87,8 +87,23 @@ limit = 300
 	if _, err := loadConfig(filepath.Join(dir, "missing.toml")); err == nil {
 		t.Error("an explicit missing config file must be an error")
 	}
-	if cfg, err := loadConfig(""); err != nil || cfg.Listen != ":8080" {
+	if cfg, err := loadConfig(""); err != nil || cfg.Listen != "127.0.0.1:8080" {
 		t.Errorf("no config file: %+v %v", cfg, err)
+	}
+}
+
+func TestConfigRejectsUnknownKeys(t *testing.T) {
+	isolateConfig(t)
+	path := filepath.Join(t.TempDir(), "filterc.toml")
+	os.WriteFile(path, []byte(`
+listen = "127.0.0.1:9999"
+[golbat]
+url = "http://golbat.example:9001"
+secert = "abc"
+`), 0o644)
+	_, err := loadConfig(path)
+	if want := "config " + path + ": unknown keys: golbat.secert"; err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
 	}
 }
 

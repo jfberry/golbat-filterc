@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -32,7 +33,7 @@ type Config struct {
 
 func defaultConfig() Config {
 	var c Config
-	c.Listen = ":8080"
+	c.Listen = "127.0.0.1:8080"
 	return c
 }
 
@@ -66,10 +67,19 @@ func loadConfig(path string) (Config, error) {
 			return cfg, nil
 		}
 	}
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	md, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		if explicit || !errors.Is(err, os.ErrNotExist) {
 			return cfg, fmt.Errorf("config %s: %w", path, err)
 		}
+		return cfg, nil
+	}
+	if unknown := md.Undecoded(); len(unknown) > 0 {
+		keys := make([]string, len(unknown))
+		for i, k := range unknown {
+			keys[i] = k.String()
+		}
+		return cfg, fmt.Errorf("config %s: unknown keys: %s", path, strings.Join(keys, ", "))
 	}
 	return cfg, nil
 }
