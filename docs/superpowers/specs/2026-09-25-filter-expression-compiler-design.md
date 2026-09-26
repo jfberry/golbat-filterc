@@ -61,13 +61,14 @@ Out of scope for v1, with the extension point kept:
 ### Syntax
 
 The syntax is the subset of [Expr](https://expr-lang.org/) below; Expr's
-parser and type checker are used, its VM is not.
+parser is used, its type checker and VM are not (the whitelist walk in
+"Parse and check" is the type check).
 
 | Construct | Example |
 |---|---|
 | comparison | `iv >= 90`, `pokemon == 1`, `gender != 2` |
 | membership | `pokemon in [1, 4, 7]`, `gender not in [0, 3]` |
-| range membership | `iv in 90..100`, `level not in 1..29` |
+| range membership | `iv in 90..100`, `level not in 1..29`, `pokemon in 1..151` |
 | conjunction, disjunction, negation | `&&`, `\|\|`, `!` (also `and`, `or`, `not`) |
 | grouping | `( … )` |
 | literals | decimal integers, possibly negative |
@@ -87,7 +88,7 @@ applies to compiled output.
 
 | Field | Domain | Notes |
 |---|---|---|
-| `pokemon` | 1..32767 | 0 and negatives are rejected; forms belong to a species |
+| `pokemon` | 1..32767 | 0 and negatives are rejected as ids (ranges are clipped); forms belong to a species |
 | `form` | 0..32767 | 0 is "no form sent", Golbat's default |
 | `iv` | −1..100 | −1 = no encounter data |
 | `atk`, `def`, `sta` | −1..15 | −1 = no encounter data |
@@ -95,13 +96,19 @@ applies to compiled output.
 | `cp` | −1..32767 | −1 = no encounter data; storage maximum |
 | `size` | −1..5 | −1 = unknown |
 | `gender` | {−1, 0, 1, 2, 3} | −1 = unknown; 0 unset, 1 male, 2 female, 3 genderless |
-| `little`, `great`, `ultra` | 1..32767 | 4096 = has PvP data but no rank in that league; NULL when the pokemon has no PvP data at all |
+| `little`, `great`, `ultra` | 1..4096 | 4096 = has PvP data but no rank in that league (`calculatePokemonPvpLookup` starts at 4096 and only lowers it); NULL when the pokemon has no PvP data at all |
 
 The `−1` values are real members of their domains because Golbat's lookup
-stores them as values and its matcher compares them as values: `iv in
--1..100` is the documented way to include un-encountered pokemon. PvP ranks
+stores them as values and its matcher compares them as values: to include
+un-encountered pokemon, leave `iv` unconstrained (or write `iv in -1..100`,
+which the compiler notes is the whole domain). PvP ranks
 are different: a pokemon with no PvP data has no rank values at all, and
 Golbat's matcher fails every PvP condition for it.
+
+The encounter tops (100 for `iv`, 15 for `atk`/`def`/`sta`) are what the
+game produces; Golbat's lookup can hold larger legacy values (its
+`lookupIv`/`lookupInt8` saturate at 127), which it treats as garbage, and a
+compiled filter never returns such rows.
 
 ### Semantics
 
@@ -117,6 +124,13 @@ matcher does today:
 - `!(great <= 100)` is true for a pokemon ranked 101 or worse, or unranked
   in Great League (4096), and *not* for a pokemon with no PvP data.
 - `!(iv >= 90)` is true for un-encountered pokemon (`iv == -1`).
+- The same holds inside a compound: `!(great <= 100 && iv == 100)` is
+  `great > 100 || iv != 100`, which *excludes* a perfect pokemon with no
+  PvP data (its PvP half is unknown and `iv != 100` is false). Rewriting it
+  as `iv != 100 || great > 100` does not change that: the PvP half has the
+  same limitation. "No PvP data" is not expressible in the v3 model, so
+  "everything except top-100 perfect ones" cannot include no-PvP perfect
+  pokemon. The compiler warns whenever a PvP literal ends up complemented.
 - `form == 0` on its own is a compile error: a form literal must be in a
   conjunction with a positive `pokemon` literal, because forms belong to a
   species and the v3 model has no "any species, this form" key. (With a
@@ -164,61 +178,89 @@ keys. `iv != 50` becomes two generic clauses (`-1..49`, `51..100`).
 
 ### Stages
 
-1. **Parse and check.** `expr/parser` then `expr/checker` against an
-   environment declaring the 13 fields as `int`. Then a whitelist walk over
-   the AST that admits only the constructs above; anything else is an error
-   at its position. Unary minus on an integer literal is folded here.
-2. **Lower to literals.** Each comparison becomes a canonical literal:
-   for range fields an *interval set* over the domain (a sorted list of
-   disjoint closed intervals); for `gender` a value set; for `pokemon` and
-   `form` an id set with a negated flag. `in`, `not in`, ranges and all six
-   comparison operators reduce to these.
+1. **Parse and check.** `expr/parser`, then a whitelist walk over the AST
+   that admits only the constructs above; anything else is an error at its
+   position. The walk is the type check: every accepted node is a
+   comparison between a known field and an integer, or and/or/not over
+   such comparisons, so Expr's checker is not used. Unary minus on an
+   integer literal is folded here. An empty expression is an error at 1:1.
+2. **Lower to literals.** Each comparison becomes a canonical literal: an
+   *interval set* over the field's domain (a sorted list of disjoint closed
+   intervals). `pokemon` and `form` are no different: `in`, `not in`,
+   ranges and all six comparison operators reduce to an interval set within
+   the domain (values below it are clipped, so `pokemon in 0..5` is 1..5;
+   `pokemon > 5` is 6..32767). Nothing is enumerated while lowering. Explicit
+   ids are still checked: `pokemon == 0`, `pokemon in [0]`, a negative form
+   or an id outside the domain is an error at that id.
 3. **Negation normal form.** `!` is pushed to the literals with De Morgan;
-   on a literal it is the complement within the field's domain (intervals →
-   complementary intervals; species/form → flip the flag).
+   on a literal it is the complement within the field's domain
+   (complementary intervals), for species and form as for every field.
 4. **Disjunctive normal form.** AND is distributed over OR. A conjunction is
-   built as it is formed — intersecting interval sets and value sets,
-   intersecting positive species and form sets, unioning negative ones — so
-   a conjunction that becomes unsatisfiable (an empty interval set, an empty
-   positive species or form set, a positive species or form also in the
-   corresponding negative set) is dropped immediately and the intermediate
+   built as it is formed — intersecting the interval sets field by field,
+   species and form included — so a conjunction that becomes unsatisfiable
+   (an empty interval set) is dropped immediately and the intermediate
    never holds more than the final conjunctions. The conjunction count is
    capped.
 5. **Split.** A v3 clause holds one `{min, max}` per range field, so a
    conjunction whose interval set for a field has *n* intervals becomes *n*
    conjunctions (the cartesian product across fields, under the same cap).
-   `gender` is emitted as a list and needs no split.
-6. **Validate.** A conjunction with a positive or negative form literal
-   must have a positive species set; otherwise it is an error citing the
-   form literal's position.
+   `gender` is emitted as a list, and `pokemon` and `form` become keys, so
+   none of them is split.
+6. **Validate.** A conjunction constraining `form` (to anything short of
+   the whole form domain) must constrain `pokemon` to a set whose small
+   side (see Dispatch) is positive; otherwise it is an error citing the
+   first form literal's position. `pokemon != 1 && form == 0` and
+   `!(pokemon == 1 && form == 0)` are therefore errors.
 7. **Dispatch.** See below.
 8. **Emit** the v3 JSON: keys sorted, conjunctions in source order, ranges
    with both bounds.
 
 ### Dispatch
 
-For a conjunction *c* write S⁺(c) for its positive species set (or ANY),
-S⁻(c) for its negative species set, F⁺(c) for its positive form set (or
-ANY) and F⁻(c) for its negative form set.
+For a conjunction *c* write S(c) for its species set (or ANY when `pokemon`
+is unconstrained) and F(c) for its form set (or ANY). For a set X over a
+domain D, |X| is Σ(hi − lo + 1) over its intervals — computed, never
+enumerated — and the **small side** of X is X itself when
+|X| ≤ |D| − |X|, otherwise its complement Xᶜ (a tie keeps X). A small
+side of Xᶜ is *negative*.
 
-**Distinguished keys** D are the `(species, form)` keys the expression names:
+**Distinguished keys** D are the `(species, form)` keys the expression
+names, drawn from small sides only:
 
-- for each *c* and each s ∈ S⁺(c): `(s, f)` for every f ∈ F⁺(c) if F⁺(c) is
-  not ANY; `(s, f)` for every f ∈ F⁻(c); and `(s, any)` if F⁺(c) is ANY;
-- for each *c* and each s ∈ S⁻(c): `(s, any)`.
+- S(c) = ANY: none (validate guarantees F(c) is ANY or the whole domain);
+- S(c) with a positive small side: for each s ∈ S(c), `(s, f)` for each f
+  on F(c)'s small side when F(c) is constrained, plus `(s, any)` when that
+  small side is negative (its exact keys are the excluded forms); or
+  `(s, any)` when F(c) is ANY;
+- S(c) with a negative small side Sᶜ: `(s, any)` for each s ∈ Sᶜ.
+
+**The key cap counts distinct keys, with pre-checks from interval sizes**:
+a conjunction naming more than the key cap by size is refused at once; each
+conjunction's own-clause entries — |S|·|F| for a positive form small side,
+|S| when F is unconstrained or its small side is negative, 0 for a negative
+species small side (exclusion keys may be shared or become single blocks) —
+are summed from sizes and refused over the id cap; only
+then are keys enumerated conjunction by conjunction into a deduplicated
+set — walking the intervals, never materialising id lists — refused as
+soon as the distinct count would exceed the key cap. So
+`pokemon > 20000 && pokemon < 20010` names nine keys, a thousand copies of
+`pokemon in 1..16383` are refused without enumerating an id, and the work
+is bounded by conjunctions × the key cap.
 
 **Buckets.** A key's bucket is the set of conjunctions that apply to a
 representative pokemon of that key:
 
-- exact key `(s, f)`: *c* with (S⁺(c) = ANY or s ∈ S⁺(c)), s ∉ S⁻(c),
-  (F⁺(c) = ANY or f ∈ F⁺(c)), and f ∉ F⁻(c);
+- exact key `(s, f)`: *c* with s ∈ S(c) (ANY contains everything) and
+  f ∈ F(c);
 - species key `(s, any)`, whose representative is a form of *s* with no
-  exact key: *c* with (S⁺(c) = ANY or s ∈ S⁺(c)), s ∉ S⁻(c), and
-  F⁺(c) = ANY. Every form named negatively for *s* has an exact key, so the
-  representative satisfies f ∉ F⁻(c) by construction;
+  exact key: *c* with s ∈ S(c) and (F(c) = ANY or F(c)'s small side is
+  negative). Every form outside a negative small side has an exact key, so
+  the representative is inside F(c) exactly then; with a positive small
+  side, every form in F(c) has an exact key and the representative is
+  outside it;
 - the generic bucket ("everything else", a species no key names): *c* with
-  S⁺(c) = ANY. S⁻(c) is irrelevant because every negatively named species
-  is a distinguished key.
+  S(c) = ANY or S(c)'s small side negative — every species that small side
+  names is a distinguished key, so the rest are in S(c).
 
 This is exactly Golbat's probe order — exact, then species, then generic —
 evaluated at compile time, so no bucket ever needs to inherit from another
@@ -229,8 +271,12 @@ at scan time and Golbat never has to merge anything.
 `pokemon` array lists every distinguished key whose bucket contains it, if
 any. Then, for each distinguished key with an empty bucket, the block clause
 `{"pokemon": [key], "iv": {"min": 1, "max": 0}}`, which can never hold and
-so stops the fallback from applying anything to that key. Output size is at
-most 2 × conjunctions + |D| clauses; identical conditions for many keys cost
+so stops the fallback from applying anything to that key. A clause
+identical to one already emitted (same keys, ranges and gender list) is
+skipped, keeping first-occurrence order; the caps count emitted clauses and
+entries. Output size is at
+most 2 × conjunctions + |D| clauses, with |D| at most the key cap, and at
+most the id cap in pokemon entries; identical conditions for many keys cost
 one clause.
 
 Worked check for `iv == 100 || (pokemon == 1 && gender == 2)`: c₁ has
@@ -240,19 +286,67 @@ clause. That is the second example above.
 
 ### Limits
 
-Defaults, overridable by option: 512 conjunctions after splitting; 10,000
-emitted clauses; 64 KiB of expression text; parse depth as Expr's default.
-Exceeding one is an error naming the limit. The server also caps request
-body size. An expression with no satisfiable conjunction compiles to an empty
-`filters` list and a warning that it matches nothing.
+Four caps, each overridable by option and each checked before the
+allocation it bounds:
+
+| cap | default | option | checked |
+|-----|---------|--------|---------|
+| conjunctions after splitting | 512 | `WithMaxConjunctions` | as DNF forms conjunctions; split refuses a field's product before building it |
+| distinct `(species, form)` keys | 10,000 | `WithMaxKeys` | per conjunction from interval sizes before enumeration, then on the distinct count as keys are collected (before any bucket is computed) |
+| pokemon entries across all clauses, blocks included | 100,000 | `WithMaxIds` | from the summed own-clause entries (interval sizes) before enumeration, then before each (non-duplicate) clause is appended |
+| emitted clauses | 10,000 | `WithMaxClauses` | before each (non-duplicate) clause is appended |
+
+In one sentence: a conjunction whose own key count exceeds the key cap, or
+own-clause entry counts summing past the id cap, are refused from
+interval sizes before anything is enumerated; otherwise keys are collected
+into a deduplicated set and refused once the distinct count exceeds the key
+cap. So the output is bounded by 2 × conjunctions + |D| clauses **and** by the id
+cap in pokemon entries: every generic conjunction repeats every key it
+applies to, so without the id cap a small expression (`pokemon in 1..10000`
+beside a few hundred generic conjunctions) could ask for millions of
+entries. Exceeding a cap is an error naming it (`expression expands to more
+than N conjunctions`, `names more than N species/form keys`, `emits more
+than N pokemon entries`, `compiles to more than N clauses`). The expression
+text is capped at 64 KiB and parse depth at Expr's default; error positions
+come from rune and line tables built once per parse, so positions cost
+O(log lines) each. The server also caps request body size. An expression
+with no satisfiable conjunction compiles to an empty `filters` list and a
+warning that it matches nothing.
 
 ### Errors
 
 One error type with a message and a source position (line, column, byte
-offset), whether it comes from Expr (syntax, type) or from the compiler
+offset), whether it comes from Expr (syntax) or from the compiler
 (unsupported construct, unknown field, non-integer literal, `pokemon` out of
 domain, form without species, a limit). The CLI prints the message with a
-caret under the position; the server returns it as JSON.
+caret under the position; the server returns it as JSON. Messages aim to
+show the fix: `not iv in [1]` says `not binds tighter than in; write not
+(iv in [1])`, and a float names itself as written (`1e2 is 100`).
+
+### Warnings
+
+An expression that compiles but probably not to what its author meant gets
+warnings in `Compiled.Warnings`. A warning about one literal is formatted
+like an error, `line:column: message`, with the literal as written; the
+list is deduplicated and in source order, and the CLI prints a caret under
+positioned ones.
+
+- **Complemented PvP literal** (by an enclosing `!`, or written as `!=` /
+  `not in`): it never matches a pokemon without PvP data.
+- **Value outside the domain**, when the literal is then empty or the whole
+  domain (`iv > 200` can never hold, `iv < 200` always holds), or when an
+  in-range comparison is (`iv > 100`, `iv >= -1`); a range reaching outside
+  the domain is reported as clipped (`iv in 50..200` is 50..100). On a PvP
+  field a whole-domain literal (`great <= 4096`) is not a no-op: it holds
+  for every pokemon with PvP data and excludes those without, and says so
+  (with no separate negated-PvP warning for that literal).
+- **Reversed range**: `iv in 5..1` is empty and can never hold.
+- **List member outside the domain**: ignored, reported at the member. A
+  list that leaves the literal empty or whole (`gender in []`, `gender in
+  [7]`, `iv not in [200]`) also gets a verdict at the literal.
+- **Species range below 1**: `pokemon in 0..3` ignores 0.
+- **Nothing can hold**: the request matches nothing (with a note when a
+  complemented PvP literal was warned about).
 
 ## Library
 
@@ -265,6 +359,8 @@ package filterc
 func Compile(expression string, opts ...Option) (*Compiled, error)
 func WithMaxConjunctions(n int) Option
 func WithMaxClauses(n int) Option
+func WithMaxKeys(n int) Option
+func WithMaxIds(n int) Option
 
 type Compiled struct {
     Filters  []Clause // v3 wire shape, json tags as the API expects
@@ -275,7 +371,7 @@ func (c *Compiled) Request(b Bounds, limit int) ScanRequest // {min, max, limit,
 type Clause struct {
     Pokemon []PokemonId `json:"pokemon,omitempty"`
     Iv, AtkIv, DefIv, StaIv, Level, Cp, Size *MinMax
-    Gender []int8      `json:"gender,omitempty"`
+    Gender []int       `json:"gender,omitempty"`
     Little, Great, Ultra *MinMax // json: pvp_little, pvp_great, pvp_ultra
 }
 
@@ -316,7 +412,7 @@ address and, if Golbat requires one, the secret.
 Config file (TOML):
 
 ```toml
-listen = ":8080"
+listen = "127.0.0.1:8080"
 
 [golbat]
 url    = "http://127.0.0.1:9001"
@@ -341,8 +437,9 @@ Server endpoints:
   413 over the body cap.
 
 The server has no authentication of its own: it is a local tool, and
-exposing it would expose the configured secret's scan capability. The README
-says so.
+exposing it would expose the configured secret's scan capability, so it
+listens on loopback by default. The README says so. Unknown config keys are
+an error, so a misspelled `secret` is not silently ignored.
 
 ## Testing
 
@@ -351,11 +448,13 @@ says so.
   message and position.
 - **Property test — the proof.** A generator produces random expressions
   (depth-limited; ids drawn from a small set so species overlap and negation
-  bites; all operators and fields) and random rows (every field across its
+  bites, plus species bounds at the top of the domain so two large sets can
+  meet in a small one; all operators and fields) and random rows (every field across its
   domain including the `−1` sentinels; PvP present with ranks including
-  4096, or absent). For each pair, `matcher(compile(e), row)` must equal
+  4096, or absent); every expression naming a form is also checked on a
+  species × form grid reaching both domain tops. For each pair, `matcher(compile(e), row)` must equal
   `reference(e, row)`. The **reference evaluator** is a hand-written
-  three-valued evaluator over the checked AST, sharing no code with the NNF,
+  three-valued evaluator over the parsed AST, sharing no code with the NNF,
   DNF or dispatch stages. The **matcher** is Golbat's v3 `isPokemonDnfMatch`
   and its exact → species → generic probe chain, copied verbatim from
   `decoder/api_pokemon_scan_v3.go` and `api_pokemon_common.go` at a recorded
@@ -366,10 +465,14 @@ says so.
   domain; no `{id: 0}` and no form without an id; block clauses only for
   keys with empty buckets; clause count within the bound above.
 - **Fuzz** the parser and compiler for panics and for the invariants.
-- **End to end**, opt-in via the config file: compile a set of expressions,
-  run each through `/scan` against a real Golbat, and check every returned
-  pokemon against the reference evaluator. This is the check that the
-  vendored matcher has not drifted.
+- **Allocation ceilings** for each cap and for positions: the adversarial
+  inputs that motivated them (1,500 half-domain species ranges, a key or
+  id blow-up, a 64 KB literal list or comparison chain) are refused or
+  compiled under 16 MiB.
+- **End to end** (follow-up, not yet built), opt-in via the config file:
+  compile a set of expressions, run each through `/scan` against a real
+  Golbat, and check every returned pokemon against the reference
+  evaluator. This is the check that the vendored matcher has not drifted.
 
 ## Extension points
 
@@ -402,6 +505,10 @@ cmd/filterc/        main.go  config.go  serve.go
 docs/superpowers/specs/  this document, then the implementation plan
 README.md  LICENSE (Unlicense, as Golbat)
 ```
+
+As built, `domains.go` (field table and domains) and `types.go` (the v3 wire
+types and `Request`) stand in for the planned `internal/model`, `emit.go` and
+`request.go` split, and lowering lives in `parse.go`.
 
 ## Decisions recorded
 
