@@ -98,4 +98,5 @@ server) point at literals that compile but probably not as meant:
 - an expression that can never hold matches nothing.
 
 Design: [docs/superpowers/specs/2026-09-25-filter-expression-compiler-design.md](docs/superpowers/specs/2026-09-25-filter-expression-compiler-design.md).
+Handover notes for contributors: [docs/handover.md](docs/handover.md).
 Background: [UnownHash/Golbat#417](https://github.com/UnownHash/Golbat/issues/417).

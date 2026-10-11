@@ -1,6 +1,6 @@
 # golbat-filterc: filter expression compiler — design
 
-Status: draft for review. Date: 2026-09-25.
+Status: implemented (PR #1, merged 2026-09-26); kept as the design record. Written 2026-09-25.
 
 ## Purpose
 
