@@ -1,6 +1,6 @@
 # Handover
 
-For whoever picks this up next — human or agent. Read this, the README and the
+For whoever picks this up next — human or agent. Read `CLAUDE.md`, this file, the README and the
 spec; the plan under `docs/superpowers/plans/` is the historical build record
 and is not kept current (it still shows the PvP domain top as 32767, for
 example).
@@ -52,15 +52,9 @@ matcher, the generator or the invariants to make it pass.
 
 ## Re-syncing the vendored matcher
 
-`filterc/matcher_test.go` is a line-for-line transcription of Golbat's
-`decoder/api_pokemon_scan_v3.go` (`isPokemonDnfMatch`) and the probe chain in
-`decoder/api_pokemon_common.go` (`internalGetPokemonInArea`), at the Golbat
-commit named in the file header. Whenever Golbat changes either, re-transcribe,
-update the header commit, and run the property test. The domains table in
-`domains.go` cites the lookup helpers in Golbat's `decoder/pokemonRtree.go`
-(`lookupIv`, `lookupInt8`, `lookupInt16`, `calculatePokemonPvpLookup`) — check
-those too; the -1 sentinel, the PvP nil/4096 behaviour and the saturation
-ceilings are what the domains encode.
+See `docs/resync.md` — a checklist of the Golbat functions, helpers, doc tags
+and proto comments the oracle and the domains are transcribed from, and the
+tests that prove the copy is current.
 
 ## Decisions that are easy to get wrong
 
