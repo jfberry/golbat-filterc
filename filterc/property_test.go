@@ -82,19 +82,19 @@ func genAtom(rng *rand.Rand) string {
 		g := pick(rng, genRangeFields)
 		op, v := pick(rng, genOps), pick(rng, g.vals)
 		if rng.Intn(4) == 0 {
-			return fmt.Sprintf("%d %s %s", v, flip(op), g.f)
+			return fmt.Sprintf("%d %s %s", v, flip(op), fieldNames[g.f])
 		}
-		return fmt.Sprintf("%s %s %d", g.f, op, v)
+		return fmt.Sprintf("%s %s %d", fieldNames[g.f], op, v)
 	case 4: // list membership
 		g := pick(rng, genRangeFields)
 		not := ""
 		if rng.Intn(2) == 0 {
 			not = "not "
 		}
-		return fmt.Sprintf("%s %sin [%d, %d]", g.f, not, pick(rng, g.vals), pick(rng, g.vals))
+		return fmt.Sprintf("%s %sin [%d, %d]", fieldNames[g.f], not, pick(rng, g.vals), pick(rng, g.vals))
 	case 5: // range membership
 		g := pick(rng, genRangeFields)
-		return fmt.Sprintf("%s in %d..%d", g.f, pick(rng, g.vals), pick(rng, g.vals))
+		return fmt.Sprintf("%s in %d..%d", fieldNames[g.f], pick(rng, g.vals), pick(rng, g.vals))
 	case 6, 7: // species
 		s := 1 + rng.Intn(4)
 		switch rng.Intn(4) {

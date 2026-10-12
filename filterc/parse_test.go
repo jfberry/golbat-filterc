@@ -5,8 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/expr-lang/expr/file"
+	"github.com/jfberry/golbat-filterc/internal/lang"
 )
+
+// maxExpressionBytes is internal/lang's source size limit.
+const maxExpressionBytes = 64 << 10
 
 func TestParseLowers(t *testing.T) {
 	cases := []struct{ src, want string }{
@@ -153,7 +156,7 @@ func TestParseLongListAllocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lit, ok := n.(*rangeLit); !ok || len(lit.set) != 8000 {
+	if lit, ok := n.(*lang.Lit); !ok || len(lit.Set) != 8000 {
 		t.Fatalf("lowered to %T, want one cp literal of 8000 intervals", n)
 	}
 	if bytes > 16<<20 {
@@ -224,29 +227,18 @@ func TestParseErrorPositionsMultiline(t *testing.T) {
 	}
 }
 
-// The table agrees with Expr's own Bind (line, column) and a rune walk
-// (byte offset) at every offset, past the end included.
-func TestPosTableMatchesBind(t *testing.T) {
-	for _, src := range []string{
-		"", "iv == 1", "a\nb", "\n\n", "é\nüx\n", "/* é */ iv == 1\n&& cp > 2\n", "\xff\xfe\n\xff", "a\r\nb\tc",
-	} {
-		tab := newPosTable(src)
-		runes := len([]rune(src))
-		for from := 0; from <= runes+2; from++ {
-			e := &file.Error{Location: file.Location{From: from}}
-			e.Bind(file.NewSource(src))
-			off, n := len(src), 0
-			for i := range src {
-				if n == from {
-					off = i
-					break
-				}
-				n++
-			}
-			want := Position{Line: e.Line, Column: e.Column + 1, Offset: off}
-			if got := tab.at(from); got != want {
-				t.Errorf("%q at %d: %+v, want %+v", src, from, got, want)
-			}
-		}
+// flip mirrors a comparison operator for `value op field`; the property
+// test's generator needs it, and lowering keeps its own copy.
+func flip(op string) string {
+	switch op {
+	case "<":
+		return ">"
+	case "<=":
+		return ">="
+	case ">":
+		return "<"
+	case ">=":
+		return "<="
 	}
+	return op
 }

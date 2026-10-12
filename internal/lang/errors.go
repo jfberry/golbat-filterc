@@ -77,16 +77,3 @@ func (w *Warnings) List() []string {
 	}
 	return out
 }
-
-// NullGroup describes fields that are NULL (absent) for some rows: every
-// condition on such a field is UNKNOWN for them, negated or not. Task 2
-// moves this declaration to model.go.
-type NullGroup struct {
-	// Whole is the verdict for a literal covering the whole domain, which
-	// is not a no-op: it excludes the rows where the field is NULL.
-	Whole string
-	// Negated is appended to the warning on a complemented literal.
-	Negated string
-	// Note is appended to "can never hold" once such a literal was warned.
-	Note string
-}

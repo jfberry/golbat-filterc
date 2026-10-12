@@ -30,6 +30,7 @@ func SetOf(ivs ...Interval) IntervalSet {
 	return out
 }
 
+// Intersect is the values in both s and t.
 func (s IntervalSet) Intersect(t IntervalSet) IntervalSet {
 	var out IntervalSet
 	for _, a := range s {
@@ -78,6 +79,7 @@ func (s IntervalSet) Values() []int {
 	return out
 }
 
+// Equal reports whether s and t hold the same intervals.
 func (s IntervalSet) Equal(t IntervalSet) bool { return slices.Equal(s, t) }
 
 // Size is the number of members, computed from the intervals.

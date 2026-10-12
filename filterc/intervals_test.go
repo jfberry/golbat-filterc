@@ -19,7 +19,7 @@ func TestSmallSide(t *testing.T) {
 	for _, c := range cases {
 		got, neg := smallSide(c.f, c.in)
 		if !got.Equal(c.want) || neg != c.neg {
-			t.Errorf("smallSide(%s, %v) = %v, %v; want %v, %v", c.f, c.in, got, neg, c.want, c.neg)
+			t.Errorf("smallSide(%s, %v) = %v, %v; want %v, %v", fieldNames[c.f], c.in, got, neg, c.want, c.neg)
 		}
 	}
 }
