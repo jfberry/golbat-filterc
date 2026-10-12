@@ -3,12 +3,15 @@
 A Go library, CLI and small server that compile boolean filter expressions
 into [Golbat](https://github.com/UnownHash/Golbat) scan requests. Today it
 covers the pokemon scan (`POST /api/pokemon/v3/scan`). **The next piece of
-work is a fort model** (gyms, pokestops, stations) on the same pipeline — see
-"Next: forts" at the end.
+work — fort models (gyms, pokestops, stations) and game names — is designed in
+`docs/superpowers/specs/2026-10-12-fort-filters-and-game-names-design.md`; see
+"Next: forts" at the end.**
 
 Read in this order: this file; `README.md` (usage, language, semantics);
 `docs/superpowers/specs/2026-09-25-filter-expression-compiler-design.md` (the
 design — its "Decisions recorded" and "Limits" sections are authoritative);
+`docs/superpowers/specs/2026-10-12-fort-filters-and-game-names-design.md` (fort
+languages and game names — the current design for the next work);
 `docs/handover.md` (backlog and gotchas); `docs/resync.md` (what to do when
 Golbat changes). The plan under `docs/superpowers/plans/` is the historical
 build record and is not kept current.
@@ -143,48 +146,12 @@ and what to write instead when there is a fix.
 
 ## Next: forts
 
-Golbat's fort scan (`POST /api/fort/scan` combined, plus the per-type scans;
-see Golbat `api.md` and `decoder/api_fort.go`) takes `ApiFortDnfFilter`
-clauses. The model differs from pokemon in ways that must be designed for, not
-assumed:
-
-1. **Plain OR, no dispatch.** `isFortDnfMatch(fortType, lookup, filter, now)`
-   is evaluated for every clause; a fort matches if any clause holds. There are
-   no species groups, so the whole dispatch stage disappears — but **an empty
-   or omitted `filters` matches every fort of the type**, the opposite of
-   pokemon (where it matches nothing). The compiler must emit something
-   explicit for "match nothing".
-2. **List conditions are tri-state.** Most fields are lists (`team_id`,
-   `raid_level`, `lure_id`, `quest_reward_type`, `incident_character`,
-   `battle_level`, …): omitted/null = no constraint, an explicitly empty list =
-   matches nothing, otherwise membership. Ranges are `ApiFortDnfMinMax`
-   (`available_slots`, `quest_reward_amount`); booleans are `*bool`
-   (`is_ar_scan_eligible`, `stationed_gmax`, `station_active`,
-   `battle_available`). Pokemon-valued lists (`raid_pokemon_id`,
-   `quest_reward_pokemon`, `contest_pokemon`, `battle_pokemon`) are `ApiDnfId`
-   lists with the same id/form shape as pokemon keys but **no precedence
-   semantics** — just membership. `contest_focus` is a structured list.
-3. **Time-dependent predicates.** Raid, lure, showcase and station conditions
-   are evaluated against `now` (`stationActiveAt`, raid active =
-   `battle > now || end > now`, lure expiry, …). The reference evaluator and
-   the row model need a `now`, and the property test must draw timestamps on
-   both sides of it.
-4. **Fort type.** Fields are per type (gym / pokestop / station); the combined
-   endpoint groups clauses per type (`ApiFortCombinedScan`, `combinedFortMatches`).
-   Decide whether the language has one `fort` namespace with a `type` field or
-   one language per type.
-5. **Negation.** With a plain OR and list membership, `team != 1` is just the
-   complement list over a small domain, and `!(raid_level in [5, 6])` is the
-   complement — no dispatch subtleties, but the tri-state (empty list ≠ nil)
-   must survive NNF/DNF.
-
-Approach that fits the existing architecture: keep the `internal/lang` front end,
-make the field table and domains per model (the spec's "Extension points"
-sketches `internal/model`), skip dispatch, add a fort emitter, a vendored
-`isFortDnfMatch` + `combinedFortMatches` as the oracle, a reference evaluator
-with `now`, and a property test over a row generator with timestamps. Start
-with a spec under `docs/superpowers/specs/` and get it reviewed before coding;
-the Golbat sources to read first are `decoder/api_fort.go` (`ApiFortDnfFilter`,
-`isFortDnfMatch`, `combinedFortMatches`, `stationActiveAt`),
-`decoder/fortRtree.go` (`FortLookup`, the sentinels), and `grpc/api.proto`
-(`FortDnfFilter`).
+The spec `docs/superpowers/specs/2026-10-12-fort-filters-and-game-names-design.md`
+is approved and is the authority. The work is four phases, each with its own
+plan and PR: phase 1, the `internal/lang` refactor, is this branch; phase 2
+(game data and names), phase 3 (forts) and phase 4 (plumbing and docs) follow,
+each planned against the code the previous phase produced. There is one
+language per fort type, targeting the single-type scans; the combined scan is
+out of scope. The Golbat sources to read are the ones listed in the spec's
+header, and the semantics to keep in mind are summarised in its "Decisions
+recorded".

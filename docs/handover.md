@@ -120,7 +120,8 @@ Spec
 Names/masterfile (a resolver hook before type checking; also enables
 species-agnostic form predicates by expansion); fort filters (same pipeline
 without dispatch — Golbat's fort filters are a plain OR); a JSON-AST input
-format for clients without a parser.
+format for clients without a parser. The fort and names design is written:
+`docs/superpowers/specs/2026-10-12-fort-filters-and-game-names-design.md`.
 
 ## Golbat-side loose ends
 

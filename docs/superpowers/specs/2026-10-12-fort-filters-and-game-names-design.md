@@ -86,7 +86,7 @@ type Field struct {
     Kind     Kind          // Range | List | Bool | PairId | PairForm
     Domain   intervalSet   // values the field can meaningfully hold
     Enum     *gamedata.Enum // names, when the field is enum-valued
-    Nullable NullGroup     // none | pvp | raid | lure | contest
+    Null     *NullGroup    // nil, or the group's messages (pvp, raid, lure, contest)
     Positive bool          // only the positive form compiles (ar_eligible, raid)
     Open     bool          // explicitly written values outside Domain extend it
 }
@@ -98,15 +98,17 @@ type Scope struct {
 }
 ```
 
-`conjunction` becomes indexed by the model's fields (a slice sized from the
-model, not `[nFields]`) plus one slot per scope group. NNF, DNF and split are
+As built in phase 1: `Field` carries `Name`, `Kind` (`Range`/`List`/`Key` so far), `Domain`, `Null *NullGroup` (the group's three message texts: whole-domain verdict, negated-literal warning, never-holds note), `IDs`, `BadID` and `Below`; later phases add `Enum`, `Positive`, `Open`, the Bool and Pair kinds and scopes. `Conjunction` holds fixed `[MaxFields]` arrays (`MaxFields = 16`) rather than slices, so a copy never shares state; a model with more fields is rejected at construction — pokestop's plain fields plus a scope's fields must fit, which phase 3 checks (raise the constant if needed). The pokemon table stayed in `filterc/domains.go` (which builds `pokemonModel`); `validate` is `filterc/validate.go`.
+
+`conjunction` becomes indexed by the model's fields (fixed `[MaxFields]` arrays,
+not `[nFields]`) plus one slot per scope group. NNF, DNF and split are
 unchanged in behaviour; they consult the model where they now consult the
 package tables (`domains[f]`, `isPvp`, `isSpecies`). `filterc.Error` and
 `filterc.Position` become aliases of the `internal/lang` types, so
 `filterc`'s public API is unchanged.
 
-`filterc` keeps the pokemon model (its field table and domains move into
-`filterc/model.go`), dispatch, the v3 types and `Compile`. The new `fortc`
+`filterc` keeps the pokemon model (its field table and domains stay in
+`filterc/domains.go`), dispatch, the v3 types and `Compile`. The new `fortc`
 package holds the three fort models, the fort emitter and the fort wire
 types.
 
@@ -223,6 +225,8 @@ and added to that field's domain for this compile, with a warning: `lure ==
 507: 507 is not a lure in the game data (Golbat 5cd3ed7); it is kept`.
 Ranges and ordered comparisons are clipped to the domain, as now.
 
+The extension is per compile: models are shared package-level tables (and `serve` compiles concurrently), so the compiler applies it as a per-compile domain overlay, never by mutating the model. Every domain check in lowering — explicit-id checks and the "outside the range" warnings — uses membership (`Contains`) so gaps count as outside, and prints enum domains by name rather than as `lo..hi`; phase 1's checks compare against `Lo()`/`Hi()`, which is only right for single-interval domains.
+
 **A fort whose value for a field is outside the field's domain (after that
 extension) is NULL for that field**: every condition on it is UNKNOWN. This is
 exactly what the emitted lists do (a complement never lists an unknown
@@ -259,7 +263,7 @@ into the domain; the resync checklist says so.
     legacy battle in the lookup's own `Battle*` fields.
   - **quest**: the AR quest or the no-AR quest. Quests are not time-gated
     and have no absent state (a stop without a quest has type 0, amount 0);
-    only the out-of-domain rule below makes a quest value NULL.
+    only the out-of-domain rule below makes a quest value NULL. A consequence a map operator may not expect: `quest(item != RARE_CANDY)` holds for a stop with no quest (item 0); the compiler warns when a negated quest condition's complement contains 0 (the no-quest value), suggesting `quest(type == ITEM) && quest(item != …)`.
 
   Conditions inside one scope literal are coupled to the same item only
   where Golbat couples them: incident `display_type` with `character`;
@@ -434,7 +438,8 @@ and a line in the README:
 - **value not in the game data** (open fields), at the value;
 - **quest conditions in one conjunction** (`quest(type == X) && quest(amount
   >= n)`): "these may be satisfied by different quests (AR and no-AR)";
-- **never holds**, as above.
+- **never holds**, as above;
+- **negated quest condition including the no-quest value** (`quest(item != RARE_CANDY)`): matches stops without a quest.
 
 The pokemon warnings (outside the domain, whole/empty, clipped, reversed
 range, list member outside the domain, list verdicts) apply per field, with
@@ -526,7 +531,7 @@ auth.
 
 ## Order of work
 
-One plan, four phases, each its own PR, green on its own:
+Four phases, each with its own plan (written against the code the previous phase produced) and its own PR, green on its own:
 
 1. **Refactor** to `internal/lang` and a pokemon `Model`. No golden changes;
    every test byte-identical.
