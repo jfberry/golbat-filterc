@@ -21,7 +21,7 @@ func (c conjunction) String() string {
 		}
 		s := field(f).String()
 		for _, iv := range c.ranges[f] {
-			s += fmt.Sprintf("[%d,%d]", iv.lo, iv.hi)
+			s += fmt.Sprintf("[%d,%d]", iv.Lo, iv.Hi)
 		}
 		parts = append(parts, s)
 	}
@@ -58,7 +58,7 @@ func merge(a, b conjunction) (conjunction, bool) {
 			c.has[f], c.ranges[f] = true, b.ranges[f]
 			continue
 		}
-		c.ranges[f] = c.ranges[f].intersect(b.ranges[f])
+		c.ranges[f] = c.ranges[f].Intersect(b.ranges[f])
 		if len(c.ranges[f]) == 0 {
 			return c, false
 		}
@@ -155,7 +155,7 @@ func split(conjs []conjunction, maxConj int) ([]conjunction, error) {
 // constrains nothing.
 func validate(conjs []conjunction) error {
 	for _, c := range conjs {
-		if !c.has[fForm] || c.ranges[fForm].equal(intervalSet{domains[fForm]}) {
+		if !c.has[fForm] || c.ranges[fForm].Equal(intervalSet{domains[fForm]}) {
 			continue
 		}
 		if !c.has[fPokemon] || smallSideNegative(fPokemon, c.ranges[fPokemon]) {

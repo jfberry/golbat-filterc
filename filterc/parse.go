@@ -173,10 +173,10 @@ func (l *lowerer) comparison(v *ast.BinaryNode) (node, error) {
 	}
 	lit := &rangeLit{f: f, set: rangeFromOp(f, op, val), pos: l.pos(v.Left), src: src, neg: op == "!="}
 	if verdict, ok := holds(f, lit.set); ok {
-		if d := domains[f]; val < d.lo || val > d.hi {
-			l.w.add(lit.pos, "%s: %d is outside %s's range %d..%d, so this condition %s", src, val, f, d.lo, d.hi, verdict)
+		if d := domains[f]; val < d.Lo || val > d.Hi {
+			l.w.Add(lit.pos, "%s: %d is outside %s's range %d..%d, so this condition %s", src, val, f, d.Lo, d.Hi, verdict)
 		} else {
-			l.w.add(lit.pos, "%s: %s's range is %d..%d, so this condition %s", src, f, d.lo, d.hi, verdict)
+			l.w.Add(lit.pos, "%s: %s's range is %d..%d, so this condition %s", src, f, d.Lo, d.Hi, verdict)
 		}
 	}
 	return lit, nil
@@ -189,7 +189,7 @@ func holds(f field, set intervalSet) (verdict string, ok bool) {
 	switch {
 	case len(set) == 0:
 		return "can never hold", true
-	case !set.equal(intervalSet{domains[f]}):
+	case !set.Equal(intervalSet{domains[f]}):
 		return "", false
 	case f.isPvp():
 		return "holds for every pokemon with PvP data and excludes pokemon without PvP data", true
@@ -227,9 +227,9 @@ func (l *lowerer) membership(v *ast.BinaryNode, neg bool) (node, error) {
 		in = "not in"
 	}
 	lit := func(set intervalSet, src string) *rangeLit {
-		set = set.intersect(intervalSet{domains[f]})
+		set = set.Intersect(intervalSet{domains[f]})
 		if neg {
-			set = set.complement(domains[f])
+			set = set.Complement(intervalSet{domains[f]})
 		}
 		return &rangeLit{f: f, set: set, pos: pos, src: fmt.Sprintf("%s %s %s", f, in, src), neg: neg}
 	}
@@ -251,15 +251,15 @@ func (l *lowerer) membership(v *ast.BinaryNode, neg bool) (node, error) {
 		ivs := make([]interval, len(vals))
 		strs := make([]string, len(vals))
 		for i, val := range vals {
-			ivs[i] = interval{val, val}
+			ivs[i] = interval{Lo: val, Hi: val}
 			strs[i] = fmt.Sprint(val)
 		}
 		out := lit(setOf(ivs...), "["+strings.Join(strs, ", ")+"]")
 		d := domains[f]
 		inDomain := 0
 		for i, val := range vals {
-			if val < d.lo || val > d.hi {
-				l.w.add(l.pos(r.Nodes[i]), "%s: %d is outside %s's range %d..%d and is ignored", out.src, val, f, d.lo, d.hi)
+			if val < d.Lo || val > d.Hi {
+				l.w.Add(l.pos(r.Nodes[i]), "%s: %d is outside %s's range %d..%d and is ignored", out.src, val, f, d.Lo, d.Hi)
 			} else {
 				inDomain++
 			}
@@ -267,11 +267,11 @@ func (l *lowerer) membership(v *ast.BinaryNode, neg bool) (node, error) {
 		if verdict, ok := holds(f, out.set); ok {
 			switch {
 			case len(vals) == 0:
-				l.w.add(pos, "%s: the list is empty, so this condition %s", out.src, verdict)
+				l.w.Add(pos, "%s: the list is empty, so this condition %s", out.src, verdict)
 			case inDomain == 0:
-				l.w.add(pos, "%s: no listed value is in %s's range %d..%d, so this condition %s", out.src, f, d.lo, d.hi, verdict)
+				l.w.Add(pos, "%s: no listed value is in %s's range %d..%d, so this condition %s", out.src, f, d.Lo, d.Hi, verdict)
 			default:
-				l.w.add(pos, "%s: %s's range is %d..%d, so this condition %s", out.src, f, d.lo, d.hi, verdict)
+				l.w.Add(pos, "%s: %s's range is %d..%d, so this condition %s", out.src, f, d.Lo, d.Hi, verdict)
 			}
 		}
 		return out, nil
@@ -285,7 +285,7 @@ func (l *lowerer) membership(v *ast.BinaryNode, neg bool) (node, error) {
 			if err != nil {
 				return nil, err
 			}
-			out := lit(setOf(interval{lo, hi}), fmt.Sprintf("%d..%d", lo, hi))
+			out := lit(setOf(interval{Lo: lo, Hi: hi}), fmt.Sprintf("%d..%d", lo, hi))
 			l.warnRange(out, lo, hi)
 			return out, nil
 		}
@@ -297,28 +297,28 @@ func (l *lowerer) membership(v *ast.BinaryNode, neg bool) (node, error) {
 // the field's domain, or which covers the whole domain.
 func (l *lowerer) warnRange(lit *rangeLit, lo, hi int) {
 	f, d := lit.f, domains[lit.f]
-	clipped := setOf(interval{lo, hi}).intersect(intervalSet{d})
-	out, outside := lo, lo < d.lo || lo > d.hi
-	if !outside && (hi < d.lo || hi > d.hi) {
+	clipped := setOf(interval{Lo: lo, Hi: hi}).Intersect(intervalSet{d})
+	out, outside := lo, lo < d.Lo || lo > d.Hi
+	if !outside && (hi < d.Lo || hi > d.Hi) {
 		out, outside = hi, true
 	}
 	verdict, ok := holds(f, lit.set)
 	switch {
 	case lo > hi: // empty whatever the domain; `not in` makes it whole
-		l.w.add(lit.pos, "%s: the range %d..%d is empty (%d > %d), so this condition %s", lit.src, lo, hi, lo, hi, verdict)
-	case f == fPokemon && lo < d.lo && hi >= d.lo && !ok:
+		l.w.Add(lit.pos, "%s: the range %d..%d is empty (%d > %d), so this condition %s", lit.src, lo, hi, lo, hi, verdict)
+	case f == fPokemon && lo < d.Lo && hi >= d.Lo && !ok:
 		ignored := fmt.Sprint(lo)
 		if lo < 0 {
 			ignored = fmt.Sprintf("%d..0", lo)
 		}
-		l.w.add(lit.pos, "%s: species ids start at 1; %s is ignored", lit.src, ignored)
+		l.w.Add(lit.pos, "%s: species ids start at 1; %s is ignored", lit.src, ignored)
 	case ok && outside:
-		l.w.add(lit.pos, "%s: %d is outside %s's range %d..%d, so this condition %s", lit.src, out, f, d.lo, d.hi, verdict)
+		l.w.Add(lit.pos, "%s: %d is outside %s's range %d..%d, so this condition %s", lit.src, out, f, d.Lo, d.Hi, verdict)
 	case ok && lo <= hi:
-		l.w.add(lit.pos, "%s: %s's range is %d..%d, so this condition %s", lit.src, f, d.lo, d.hi, verdict)
+		l.w.Add(lit.pos, "%s: %s's range is %d..%d, so this condition %s", lit.src, f, d.Lo, d.Hi, verdict)
 	case outside:
 		c := clipped[0]
-		l.w.add(lit.pos, "%s: %d is outside %s's range %d..%d; the range is clipped to %d..%d", lit.src, out, f, d.lo, d.hi, c.lo, c.hi)
+		l.w.Add(lit.pos, "%s: %d is outside %s's range %d..%d; the range is clipped to %d..%d", lit.src, out, f, d.Lo, d.Hi, c.Lo, c.Hi)
 	}
 }
 
@@ -380,8 +380,8 @@ func checkIds(f field, vals []int, posOf func(i int) Position) error {
 		if f == fPokemon && v < 1 {
 			return errorf(posOf(i), `pokemon %d is not a species id; leave pokemon unconstrained for "everything else"`, v)
 		}
-		if v < d.lo || v > d.hi {
-			return errorf(posOf(i), "%s %d is out of range %d..%d", f, v, d.lo, d.hi)
+		if v < d.Lo || v > d.Hi {
+			return errorf(posOf(i), "%s %d is out of range %d..%d", f, v, d.Lo, d.Hi)
 		}
 	}
 	return nil
@@ -393,17 +393,17 @@ func rangeFromOp(f field, op string, v int) intervalSet {
 	var raw interval
 	switch op {
 	case "==":
-		raw = interval{v, v}
+		raw = interval{Lo: v, Hi: v}
 	case "!=":
-		return setOf(interval{v, v}).complement(d)
+		return setOf(interval{Lo: v, Hi: v}).Complement(intervalSet{d})
 	case "<":
-		raw = interval{d.lo, v - 1}
+		raw = interval{Lo: d.Lo, Hi: v - 1}
 	case "<=":
-		raw = interval{d.lo, v}
+		raw = interval{Lo: d.Lo, Hi: v}
 	case ">":
-		raw = interval{v + 1, d.hi}
+		raw = interval{Lo: v + 1, Hi: d.Hi}
 	case ">=":
-		raw = interval{v, d.hi}
+		raw = interval{Lo: v, Hi: d.Hi}
 	}
-	return setOf(raw).intersect(intervalSet{d})
+	return setOf(raw).Intersect(intervalSet{d})
 }

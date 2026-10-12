@@ -15,10 +15,10 @@ func TestFieldNamesRoundTrip(t *testing.T) {
 
 func TestDomains(t *testing.T) {
 	want := map[field]interval{
-		fPokemon: {1, 32767}, fForm: {0, 32767},
-		fIv: {-1, 100}, fAtk: {-1, 15}, fDef: {-1, 15}, fSta: {-1, 15},
-		fLevel: {-1, 127}, fCp: {-1, 32767}, fGender: {-1, 3}, fSize: {-1, 5},
-		fLittle: {1, 4096}, fGreat: {1, 4096}, fUltra: {1, 4096},
+		fPokemon: {Lo: 1, Hi: 32767}, fForm: {Lo: 0, Hi: 32767},
+		fIv: {Lo: -1, Hi: 100}, fAtk: {Lo: -1, Hi: 15}, fDef: {Lo: -1, Hi: 15}, fSta: {Lo: -1, Hi: 15},
+		fLevel: {Lo: -1, Hi: 127}, fCp: {Lo: -1, Hi: 32767}, fGender: {Lo: -1, Hi: 3}, fSize: {Lo: -1, Hi: 5},
+		fLittle: {Lo: 1, Hi: 4096}, fGreat: {Lo: 1, Hi: 4096}, fUltra: {Lo: 1, Hi: 4096},
 	}
 	for f, d := range want {
 		if domains[f] != d {

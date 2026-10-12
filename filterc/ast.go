@@ -45,7 +45,7 @@ func format(n node) string {
 	case *rangeLit:
 		parts := make([]string, len(v.set))
 		for i, iv := range v.set {
-			parts[i] = fmt.Sprintf("[%d,%d]", iv.lo, iv.hi)
+			parts[i] = fmt.Sprintf("[%d,%d]", iv.Lo, iv.Hi)
 		}
 		return v.f.String() + "{" + strings.Join(parts, ",") + "}"
 	}

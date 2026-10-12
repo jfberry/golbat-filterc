@@ -26,7 +26,7 @@ func pushNot(n node, neg bool, w *warnings) node {
 		if !neg {
 			return v
 		}
-		return &rangeLit{f: v.f, set: v.set.complement(domains[v.f]), pos: v.pos, src: v.src, neg: !v.neg}
+		return &rangeLit{f: v.f, set: v.set.Complement(intervalSet{domains[v.f]}), pos: v.pos, src: v.src, neg: !v.neg}
 	}
 	return n
 }
@@ -42,13 +42,15 @@ func warnNegatedPvp(v *rangeLit, neg bool, w *warnings) {
 	if w == nil || !v.f.isPvp() || neg == v.neg {
 		return
 	}
-	w.pvpNegated = true
-	if v.set.equal(intervalSet{domains[v.f]}) {
+	if w.Negated == nil {
+		w.Negated = pvpNull
+	}
+	if v.set.Equal(intervalSet{domains[v.f]}) {
 		return
 	}
 	if neg {
-		w.add(v.pos, "negating %s %s", v.src, noPvpData)
+		w.Add(v.pos, "negating %s %s", v.src, noPvpData)
 	} else {
-		w.add(v.pos, "%s %s", v.src, noPvpData)
+		w.Add(v.pos, "%s %s", v.src, noPvpData)
 	}
 }
