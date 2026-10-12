@@ -36,28 +36,35 @@ pokemon in 1..151 && iv >= 90
 
 and emits the typed request, once, at edit time. Golbat's hot path is untouched.
 
-## Pipeline (package `filterc`)
+## Pipeline (`internal/lang` + package `filterc`)
 
 ```
-parse.go      Expr parser → whitelist lowering → boolean tree of literals.
-              Every literal is an interval set over its field's domain
-              (species and form included). Errors and most warnings start here.
-nnf.go        negation normal form: `!` becomes complement within the domain.
-dnf.go        DNF with early pruning (AND = intersection, empty → dropped),
-              interval splitting for range fields, validate (a form
-              constraint needs a species constraint whose small side is positive).
-dispatch.go   THE CORE. Per conjunction, the smaller side of its species set and
-              of its form set names the distinguished (species, form) keys; a
-              key's bucket is the conjunctions that hold for a representative
-              of that key; emission writes a generic clause, a keyed clause
-              listing every key whose bucket contains the conjunction, and a
-              block clause for every empty bucket. Four caps are checked
-              before the allocation they bound. Identical clauses are deduped.
-domains.go    The field domains and their sentinels — every range decision
-              lives in this table and its comments, which cite Golbat's lookup
-              helpers.
-types.go      v3 wire shapes. compile.go  public API + options. errors.go
-              positioned errors and the warnings collector.
+internal/lang/  the model-driven front end, shared by every language
+  lower.go      Expr parser → whitelist lowering → boolean tree of literals.
+                Every literal is an interval set over its field's domain
+                (species and form included). Errors and most warnings start here.
+  nnf.go        negation normal form: `!` becomes complement within the domain.
+  dnf.go        DNF with early pruning (AND = intersection, empty → dropped),
+                interval splitting for Range fields.
+  model.go      Model and Field: name, kind (Range/List/Key), domain, NULL
+                group, id checks — what the front end reads instead of
+                package tables. intervals.go, errors.go (positioned errors,
+                the warnings collector), ast.go.
+filterc/
+  domains.go    The pokemon field domains and their sentinels — every range
+                decision lives in this table and its comments, which cite
+                Golbat's lookup helpers. Builds pokemonModel.
+  validate.go   a form constraint needs a species constraint whose small side
+                is positive.
+  dispatch.go   THE CORE. Per conjunction, the smaller side of its species set and
+                of its form set names the distinguished (species, form) keys; a
+                key's bucket is the conjunctions that hold for a representative
+                of that key; emission writes a generic clause, a keyed clause
+                listing every key whose bucket contains the conjunction, and a
+                block clause for every empty bucket. Four caps are checked
+                before the allocation they bound. Identical clauses are deduped.
+  types.go      v3 wire shapes. compile.go  public API + options. stages.go
+                unexported wrappers over internal/lang for compile.go and tests.
 ```
 
 `golbat/` is a minimal scan client. `cmd/filterc/` is `compile` / `scan` /
