@@ -37,3 +37,13 @@ func TestMergeAndSplitLeaveInputsAlone(t *testing.T) {
 		t.Errorf("DNF = %v", conjs)
 	}
 }
+
+func TestToDNFRejectsNonNNF(t *testing.T) {
+	m := testModel()
+	defer func() {
+		if recover() == nil {
+			t.Error("ToDNF of a Not did not panic")
+		}
+	}()
+	ToDNF(m, &Not{X: &Lit{F: 0, Set: IntervalSet{{0, 1}}}}, 16)
+}

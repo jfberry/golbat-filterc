@@ -64,6 +64,7 @@ func NewModel(name string, fields []Field) *Model {
 	if len(fields) > MaxFields {
 		panic(fmt.Sprintf("lang: model %s has %d fields, more than %d", name, len(fields), MaxFields))
 	}
+	fields = append([]Field(nil), fields...)
 	m := &Model{Name: name, fields: fields, byName: make(map[string]FieldID, len(fields))}
 	for i, f := range fields {
 		if _, dup := m.byName[f.Name]; dup {
@@ -71,6 +72,9 @@ func NewModel(name string, fields []Field) *Model {
 		}
 		if len(f.Domain) == 0 {
 			panic(fmt.Sprintf("lang: model %s field %q has an empty domain", name, f.Name))
+		}
+		if !SetOf(f.Domain...).Equal(f.Domain) {
+			panic(fmt.Sprintf("lang: model %s field %q has a domain that is not normalised; build it with SetOf", name, f.Name))
 		}
 		m.byName[f.Name] = FieldID(i)
 	}

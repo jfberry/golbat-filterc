@@ -7,6 +7,8 @@ import (
 
 // Conjunction is one AND of literals over a model's fields. It is a value:
 // copying one copies its arrays, and no stage writes into a set in place.
+// Conjunctions are built only by ToDNF and Split; the zero value has no
+// model and is not usable.
 type Conjunction struct {
 	m    *Model
 	Has  [MaxFields]bool        // Sets[f] is a constraint (possibly empty = unsatisfiable)
@@ -105,6 +107,9 @@ func ToDNF(m *Model, n Node, maxConj int) ([]Conjunction, error) {
 			return nil, TooMany(maxConj)
 		}
 		return append(l, r...), nil
+	}
+	if _, isLit := n.(*Lit); !isLit {
+		panic(fmt.Sprintf("lang: ToDNF needs negation normal form, got %T", n))
 	}
 	if c, ok := fromLit(m, n); ok {
 		return []Conjunction{c}, nil

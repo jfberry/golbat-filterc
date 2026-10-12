@@ -31,9 +31,10 @@ func TestNewModelRejects(t *testing.T) {
 		many[i] = Field{Name: strings.Repeat("x", i+1), Domain: IntervalSet{{0, 1}}}
 	}
 	cases := map[string][]Field{
-		"duplicate":    {{Name: "a", Domain: IntervalSet{{0, 1}}}, {Name: "a", Domain: IntervalSet{{0, 1}}}},
-		"empty domain": {{Name: "a"}},
-		"too many":     many,
+		"duplicate":      {{Name: "a", Domain: IntervalSet{{0, 1}}}, {Name: "a", Domain: IntervalSet{{0, 1}}}},
+		"empty domain":   {{Name: "a"}},
+		"too many":       many,
+		"not normalised": {{Name: "a", Domain: IntervalSet{{0, 0}, {1, 1}}}},
 	}
 	for name, fields := range cases {
 		func() {
@@ -44,5 +45,14 @@ func TestNewModelRejects(t *testing.T) {
 			}()
 			NewModel("bad", fields)
 		}()
+	}
+}
+
+func TestNewModelCopiesFields(t *testing.T) {
+	fields := []Field{{Name: "a", Domain: IntervalSet{{0, 1}}}}
+	m := NewModel("copy", fields)
+	fields[0].Name = "z"
+	if got := m.Field(0).Name; got != "a" {
+		t.Errorf("model field changed through the caller's slice: %q", got)
 	}
 }
