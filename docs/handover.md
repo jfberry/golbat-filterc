@@ -27,7 +27,7 @@ extend this compiler instead.
 | `internal/lang/` | the shared front end: `lower.go` (Expr parser + whitelist lowering; all errors and most warnings originate here), `nnf.go`, `dnf.go` (DNF, early pruning, interval splitting), `model.go` (the field-table type every language fills in) |
 | `filterc/validate.go`, `dispatch.go` | the form-needs-species check; the core: small-side key naming, buckets via `applies`, caps, emission, clause dedupe |
 | `filterc/domains.go` | the pokemon field table and domains — every semantic decision about ranges lives in this table and its comments; builds `pokemonModel` |
-| `filterc/compile.go`, `types.go`, `errors.go` | public API, v3 wire types, positioned errors and the warnings collector |
+| `filterc/compile.go`, `types.go`, `errors.go`, `stages.go` | public API, v3 wire types, the `Error`/`Position` aliases of `internal/lang`'s types, and the unexported wrappers over `internal/lang` used by `compile.go` and the tests |
 | `filterc/matcher_test.go` | **the oracle**: Golbat's matcher transcribed verbatim (see "Re-syncing" below) |
 | `filterc/reference_test.go`, `row_test.go`, `property_test.go` | the three-valued reference evaluator and the property test that proves the compiler against it |
 | `golbat/` | minimal scan client |

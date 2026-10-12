@@ -178,7 +178,7 @@ assumed:
    complement — no dispatch subtleties, but the tri-state (empty list ≠ nil)
    must survive NNF/DNF.
 
-Approach that fits the existing architecture: keep `parse.go`'s front end,
+Approach that fits the existing architecture: keep the `internal/lang` front end,
 make the field table and domains per model (the spec's "Extension points"
 sketches `internal/model`), skip dispatch, add a fort emitter, a vendored
 `isFortDnfMatch` + `combinedFortMatches` as the oracle, a reference evaluator
