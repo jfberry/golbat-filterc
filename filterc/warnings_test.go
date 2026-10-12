@@ -117,16 +117,16 @@ func TestWarnings(t *testing.T) {
 func TestWarningsDedupeInSourceOrder(t *testing.T) {
 	w := &warnings{}
 	at := func(line, col, off int) Position { return Position{Line: line, Column: col, Offset: off} }
-	w.add(at(1, 9, 8), "b")
-	w.add(at(1, 1, 0), "a")
-	w.add(at(1, 9, 8), "b")
-	w.add(at(1, 1, 0), "c")
-	if got, want := w.list(), []string{"1:1: a", "1:1: c", "1:9: b"}; !slices.Equal(got, want) {
+	w.Add(at(1, 9, 8), "b")
+	w.Add(at(1, 1, 0), "a")
+	w.Add(at(1, 9, 8), "b")
+	w.Add(at(1, 1, 0), "c")
+	if got, want := w.List(), []string{"1:1: a", "1:1: c", "1:9: b"}; !slices.Equal(got, want) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 	var none *warnings
-	none.add(at(1, 1, 0), "ignored")
-	if none.list() != nil {
+	none.Add(at(1, 1, 0), "ignored")
+	if none.List() != nil {
 		t.Error("a nil collector must discard")
 	}
 }

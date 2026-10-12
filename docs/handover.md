@@ -5,8 +5,7 @@ spec; the plan under `docs/superpowers/plans/` is the historical build record
 and is not kept current (it still shows the PvP domain top as 32767, for
 example).
 
-State on 2026-10-11: PR #1 merged to `main` (`ae74ad1`); no open PRs; `go test
-./...` green.
+State on 2026-10-12: phase 1 of the fort/names spec (internal/lang refactor) in review; go test ./... green.
 
 ## What this is, in one paragraph
 
@@ -25,11 +24,10 @@ extend this compiler instead.
 
 | Path | Responsibility |
 |---|---|
-| `filterc/parse.go` | Expr parser + whitelist lowering to the boolean tree; all errors and most warnings originate here |
-| `filterc/nnf.go`, `dnf.go` | negation normal form (complement within the domain), DNF with early pruning, interval splitting, the form-needs-species check |
-| `filterc/dispatch.go` | the core: small-side key naming, buckets via `applies`, caps, emission, clause dedupe |
-| `filterc/domains.go` | the field domains — every semantic decision about ranges lives in this table and its comments |
-| `filterc/compile.go`, `types.go`, `errors.go` | public API, v3 wire types, positioned errors and the warnings collector |
+| `internal/lang/` | the shared front end: `lower.go` (Expr parser + whitelist lowering; all errors and most warnings originate here), `nnf.go`, `dnf.go` (DNF, early pruning, interval splitting), `model.go` (the field-table type every language fills in) |
+| `filterc/validate.go`, `dispatch.go` | the form-needs-species check; the core: small-side key naming, buckets via `applies`, caps, emission, clause dedupe |
+| `filterc/domains.go` | the pokemon field table and domains — every semantic decision about ranges lives in this table and its comments; builds `pokemonModel` |
+| `filterc/compile.go`, `types.go`, `errors.go`, `stages.go` | public API, v3 wire types, the `Error`/`Position` aliases of `internal/lang`'s types, and the unexported wrappers over `internal/lang` used by `compile.go` and the tests |
 | `filterc/matcher_test.go` | **the oracle**: Golbat's matcher transcribed verbatim (see "Re-syncing" below) |
 | `filterc/reference_test.go`, `row_test.go`, `property_test.go` | the three-valued reference evaluator and the property test that proves the compiler against it |
 | `golbat/` | minimal scan client |
@@ -122,7 +120,8 @@ Spec
 Names/masterfile (a resolver hook before type checking; also enables
 species-agnostic form predicates by expansion); fort filters (same pipeline
 without dispatch — Golbat's fort filters are a plain OR); a JSON-AST input
-format for clients without a parser.
+format for clients without a parser. The fort and names design is written:
+`docs/superpowers/specs/2026-10-12-fort-filters-and-game-names-design.md`.
 
 ## Golbat-side loose ends
 

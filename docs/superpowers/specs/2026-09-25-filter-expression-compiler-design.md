@@ -510,6 +510,11 @@ As built, `domains.go` (field table and domains) and `types.go` (the v3 wire
 types and `Request`) stand in for the planned `internal/model`, `emit.go` and
 `request.go` split, and lowering lives in `parse.go`.
 
+That was the layout until 2026-10-12 (fort/names spec, phase 1): since then
+lowering, NNF, DNF and split live in `internal/lang` behind a `Model`;
+`filterc/domains.go` builds the pokemon model and `filterc/validate.go` holds
+the species check.
+
 ## Decisions recorded
 
 - Target the fallback model as documented in Golbat#420; do not propose

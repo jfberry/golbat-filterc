@@ -82,19 +82,19 @@ func genAtom(rng *rand.Rand) string {
 		g := pick(rng, genRangeFields)
 		op, v := pick(rng, genOps), pick(rng, g.vals)
 		if rng.Intn(4) == 0 {
-			return fmt.Sprintf("%d %s %s", v, flip(op), g.f)
+			return fmt.Sprintf("%d %s %s", v, flip(op), fieldNames[g.f])
 		}
-		return fmt.Sprintf("%s %s %d", g.f, op, v)
+		return fmt.Sprintf("%s %s %d", fieldNames[g.f], op, v)
 	case 4: // list membership
 		g := pick(rng, genRangeFields)
 		not := ""
 		if rng.Intn(2) == 0 {
 			not = "not "
 		}
-		return fmt.Sprintf("%s %sin [%d, %d]", g.f, not, pick(rng, g.vals), pick(rng, g.vals))
+		return fmt.Sprintf("%s %sin [%d, %d]", fieldNames[g.f], not, pick(rng, g.vals), pick(rng, g.vals))
 	case 5: // range membership
 		g := pick(rng, genRangeFields)
-		return fmt.Sprintf("%s in %d..%d", g.f, pick(rng, g.vals), pick(rng, g.vals))
+		return fmt.Sprintf("%s in %d..%d", fieldNames[g.f], pick(rng, g.vals), pick(rng, g.vals))
 	case 6, 7: // species
 		s := 1 + rng.Intn(4)
 		switch rng.Intn(4) {
@@ -117,7 +117,7 @@ func genAtom(rng *rand.Rand) string {
 		case 3:
 			return fmt.Sprintf("pokemon %s %d", pick(rng, []string{"<=", ">="}), rng.Intn(6))
 		case 4: // bounds at the top of the domain: two large sides can meet in a small set
-			hi := domains[fPokemon].hi
+			hi := domains[fPokemon].Hi
 			switch rng.Intn(4) {
 			case 0:
 				return fmt.Sprintf("pokemon > %d", hi-rng.Intn(8))
@@ -162,7 +162,7 @@ func genExpr(rng *rand.Rand, depth int) string {
 func genRow(rng *rand.Rand) row {
 	r := row{pokemonId: 1 + rng.Intn(5), form: rng.Intn(4)}
 	if rng.Intn(8) == 0 { // the top of the species domain, named by large bounds
-		r.pokemonId = domains[fPokemon].hi - rng.Intn(8)
+		r.pokemonId = domains[fPokemon].Hi - rng.Intn(8)
 	}
 	r.iv, r.atk, r.def, r.sta = pick(rng, genRangeFields[0].vals), pick(rng, genRangeFields[1].vals), pick(rng, genRangeFields[2].vals), pick(rng, genRangeFields[3].vals)
 	r.level, r.cp, r.gender, r.size = pick(rng, genRangeFields[4].vals), pick(rng, genRangeFields[5].vals), pick(rng, genRangeFields[6].vals), pick(rng, genRangeFields[7].vals)
@@ -191,7 +191,7 @@ func checkInvariants(t *testing.T, src string, c *Compiled) {
 		t.Fatalf("%q: not deterministic", src)
 	}
 	inDomain := func(mm *MinMax, f field) bool {
-		return mm == nil || (mm.Min <= mm.Max && mm.Min >= domains[f].lo && mm.Max <= domains[f].hi)
+		return mm == nil || (mm.Min <= mm.Max && mm.Min >= domains[f].Lo && mm.Max <= domains[f].Hi)
 	}
 	listed := map[dnfKey]bool{}
 	var blocks []dnfKey
@@ -219,7 +219,7 @@ func checkInvariants(t *testing.T, src string, c *Compiled) {
 			t.Fatalf("%q: range outside its domain in %s", src, mustJSON(cl))
 		}
 		for _, g := range cl.Gender {
-			if g < domains[fGender].lo || g > domains[fGender].hi {
+			if g < domains[fGender].Lo || g > domains[fGender].Hi {
 				t.Fatalf("%q: gender %d outside its domain", src, g)
 			}
 		}
@@ -235,8 +235,8 @@ func TestCompileMatchesReference(t *testing.T) {
 	rng := rand.New(rand.NewSource(20260925))
 	const samples = 5000
 	skipped, gridChecked := 0, 0
-	gridSpecies := []int{1, 2, 3, 4, 5, 6, domains[fPokemon].hi - 7, domains[fPokemon].hi}
-	gridForms := []int{0, 1, 2, 3, 4, domains[fForm].hi}
+	gridSpecies := []int{1, 2, 3, 4, 5, 6, domains[fPokemon].Hi - 7, domains[fPokemon].Hi}
+	gridForms := []int{0, 1, 2, 3, 4, domains[fForm].Hi}
 	for i := 0; i < samples; i++ {
 		src := genExpr(rng, 0)
 		c, err := Compile(src)

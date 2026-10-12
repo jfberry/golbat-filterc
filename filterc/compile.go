@@ -55,11 +55,11 @@ func Compile(expression string, opts ...Option) (*Compiled, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Compiled{Filters: clauses, Warnings: w.list()}
+	c := &Compiled{Filters: clauses, Warnings: w.List()}
 	if len(clauses) == 0 {
 		msg := "the expression can never hold; the request matches nothing"
-		if w.pvpNegated {
-			msg += "; note that negated PvP conditions never match pokemon without PvP data"
+		if w.Negated != nil {
+			msg += "; " + w.Negated.Note
 		}
 		c.Warnings = append(c.Warnings, msg)
 	}

@@ -34,14 +34,14 @@ type keyPlan struct {
 
 func planFor(c conjunction) keyPlan {
 	p := keyPlan{c: c, generic: true}
-	if c.has[fPokemon] {
-		p.species, p.speciesNeg = smallSide(fPokemon, c.ranges[fPokemon])
+	if c.Has[fPokemon] {
+		p.species, p.speciesNeg = smallSide(fPokemon, c.Sets[fPokemon])
 		p.generic = p.speciesNeg
 	}
 	// a form set covering the whole domain passes validate without a species;
 	// its small side is the empty complement, so it constrains nothing
-	if c.has[fForm] {
-		p.form, p.formNeg = smallSide(fForm, c.ranges[fForm])
+	if c.Has[fForm] {
+		p.form, p.formNeg = smallSide(fForm, c.Sets[fForm])
 	}
 	return p
 }
@@ -51,14 +51,14 @@ func planFor(c conjunction) keyPlan {
 // species small side is positive.
 func (p keyPlan) keyCount() int {
 	switch {
-	case !p.c.has[fPokemon]:
+	case !p.c.Has[fPokemon]:
 		return 0
-	case p.speciesNeg || !p.c.has[fForm]:
-		return p.species.size()
+	case p.speciesNeg || !p.c.Has[fForm]:
+		return p.species.Size()
 	case p.formNeg:
-		return p.species.size() * (p.form.size() + 1)
+		return p.species.Size() * (p.form.Size() + 1)
 	}
-	return p.species.size() * p.form.size()
+	return p.species.Size() * p.form.Size()
 }
 
 // ownEntries is the number of keys the plan's own keyed clause lists, from
@@ -68,12 +68,12 @@ func (p keyPlan) keyCount() int {
 // keys). A negative species small side names only keys it excludes.
 func (p keyPlan) ownEntries() int {
 	switch {
-	case !p.c.has[fPokemon] || p.speciesNeg:
+	case !p.c.Has[fPokemon] || p.speciesNeg:
 		return 0
-	case !p.c.has[fForm] || p.formNeg:
-		return p.species.size()
+	case !p.c.Has[fForm] || p.formNeg:
+		return p.species.Size()
 	}
-	return p.species.size() * p.form.size()
+	return p.species.Size() * p.form.Size()
 }
 
 // keys yields the plan's keys by walking the intervals, without
@@ -83,12 +83,12 @@ func (p keyPlan) ownEntries() int {
 // forms excluded).
 func (p keyPlan) keys() iter.Seq[key] {
 	return func(yield func(key) bool) {
-		if !p.c.has[fPokemon] {
+		if !p.c.Has[fPokemon] {
 			return
 		}
-		byForm := !p.speciesNeg && p.c.has[fForm]
+		byForm := !p.speciesNeg && p.c.Has[fForm]
 		for _, si := range p.species {
-			for s := si.lo; s <= si.hi; s++ {
+			for s := si.Lo; s <= si.Hi; s++ {
 				if !byForm {
 					if !yield(key{s, anyForm}) {
 						return
@@ -96,7 +96,7 @@ func (p keyPlan) keys() iter.Seq[key] {
 					continue
 				}
 				for _, fi := range p.form {
-					for f := fi.lo; f <= fi.hi; f++ {
+					for f := fi.Lo; f <= fi.Hi; f++ {
 						if !yield(key{s, f}) {
 							return
 						}
@@ -117,16 +117,16 @@ func (p keyPlan) keys() iter.Seq[key] {
 // F's small side is negative.
 func (p keyPlan) applies(k key) bool {
 	c := p.c
-	if c.has[fPokemon] && !c.ranges[fPokemon].contains(k.species) {
+	if c.Has[fPokemon] && !c.Sets[fPokemon].Contains(k.species) {
 		return false
 	}
-	if !c.has[fForm] {
+	if !c.Has[fForm] {
 		return true
 	}
 	if k.form == anyForm {
 		return p.formNeg
 	}
-	return c.ranges[fForm].contains(k.form)
+	return c.Sets[fForm].Contains(k.form)
 }
 
 func blockClause(k key) Clause {
@@ -135,17 +135,17 @@ func blockClause(k key) Clause {
 
 func clauseFor(c conjunction, ids []PokemonId) Clause {
 	cl := Clause{Pokemon: ids}
-	for f := range c.ranges {
+	for f := range nFields {
 		// pokemon and form are the clause's keys, not conditions
-		if !c.has[f] || field(f).isSpecies() {
+		if !c.Has[f] || isSpecies(f) {
 			continue
 		}
-		if field(f) == fGender {
-			cl.Gender = c.ranges[f].values()
+		if f == fGender {
+			cl.Gender = c.Sets[f].Values()
 			continue
 		}
-		iv := c.ranges[f][0] // a range field has exactly one interval after split
-		cl.setRange(field(f), &MinMax{Min: iv.lo, Max: iv.hi})
+		iv := c.Sets[f][0] // a range field has exactly one interval after split
+		cl.setRange(f, &MinMax{Min: iv.Lo, Max: iv.Hi})
 	}
 	return cl
 }
@@ -282,4 +282,21 @@ func dispatchCapped(conjs []conjunction, maxClauses, maxKeys, maxIds int) ([]Cla
 		}
 	}
 	return clauses, nil
+}
+
+// smallSideNegative reports whether the small side of s over f's domain is
+// its complement: s holds more than half the domain (a tie keeps s).
+func smallSideNegative(f field, s intervalSet) bool {
+	d := domains[f]
+	n := s.Size()
+	return n > d.Hi-d.Lo+1-n
+}
+
+// smallSide returns the smaller of s and its complement over f's domain,
+// and whether it is the complement.
+func smallSide(f field, s intervalSet) (intervalSet, bool) {
+	if smallSideNegative(f, s) {
+		return s.Complement(intervalSet{domains[f]}), true
+	}
+	return s, false
 }
